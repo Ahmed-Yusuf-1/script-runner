@@ -10,10 +10,24 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "smoke": "tsx src/main/engine/smoke.ts",
+    "smoke:repeat": "tsx src/main/engine/smoke-repeat.ts",
+    "smoke:download": "tsx src/main/engine/smoke-download.ts",
+    "smoke:adblock": "tsx src/main/engine/smoke-adblock.ts",
+    "smoke:newtab": "tsx src/main/engine/smoke-newtab.ts",
+    "smoke:match": "tsx src/main/engine/smoke-match.ts",
+    "smoke:back": "tsx src/main/engine/smoke-back.ts",
+    "smoke:nth": "tsx src/main/engine/smoke-nth.ts",
+    "smoke:autoinc": "tsx src/main/engine/smoke-autoinc.ts",
+    "smoke:waitafter": "tsx src/main/engine/smoke-waitafter.ts",
+    "smoke:profile": "tsx src/main/engine/smoke-profile.ts",
+    "smoke:tabfollow": "tsx src/main/engine/smoke-tabfollow.ts",
+    "smoke:closetab": "tsx src/main/engine/smoke-closetab.ts",
+    "smoke:whitelist": "tsx src/main/engine/smoke-whitelist.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "postinstall": "playwright install chromium"
   },
   "dependencies": {
+    "@ghostery/adblocker-playwright": "^2.17.3",
     "playwright": "^1.48.0"
   },
   "devDependencies": {
@@ -22,6 +36,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.0",
     "electron": "^33.0.0",
+    "electron-builder": "^26.8.1",
     "electron-vite": "^2.3.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",

@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+
+# Build / bundle output
+out/
+dist/
+build/
+release/
+*.tsbuildinfo
+
+# Caches
+.cache/
+.vite/
+.eslintcache
+adblocker-engine.bin
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor folders
+.idea/
+*.swp
+*~
+
+# Saved flows / runtime data (these live in the OS userData dir, but ignore if copied here)
+flows/
+settings.json
