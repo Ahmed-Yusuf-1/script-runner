@@ -23,7 +23,7 @@ async function main() {
 
   try {
     await ctx.page.goto('https://example.com', { waitUntil: 'domcontentloaded' });
-    const cached = existsSync(join(cacheDir, 'adblocker-engine.bin'));
+    const cached = existsSync(join(cacheDir, 'adblocker-engine-full.bin'));
 
     // Open a pop-up via a real click (a user gesture) and confirm it's closed.
     await ctx.page.setContent('<a id="x" href="about:blank" target="_blank">open</a>');

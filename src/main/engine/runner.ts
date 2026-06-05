@@ -74,6 +74,10 @@ export async function runFlow(
           const halt = await runStep(ctx, steps[i], settings, passVars, emit, signal);
           if (halt) return halt;
         }
+        // Don't start the next repetition while a download is still saving.
+        if (repeat.waitForDownloads && p < repeat.times - 1) {
+          await waitForActiveDownloads(ctx, emit, signal);
+        }
         if (repeat.delayMs > 0 && p < repeat.times - 1 && !signal.aborted) {
           emit.log(`Pausing ${repeat.delayMs}ms before the next repetition…`);
           await new Promise((r) => setTimeout(r, repeat.delayMs));
@@ -87,6 +91,9 @@ export async function runFlow(
       }
     }
 
+    // Let any in-progress download finish before we close the browser (closing
+    // would abort a large download mid-stream).
+    if (!signal.aborted) await waitForActiveDownloads(ctx, emit, signal);
     if (!signal.aborted) emit.log('✅ Done.');
     return { ok: true };
   } finally {
@@ -94,6 +101,20 @@ export async function runFlow(
     await close(ctx);
     emit.log('Browser closed.');
   }
+}
+
+/** Block until all in-progress downloads finish saving (or the user hits Stop). */
+async function waitForActiveDownloads(
+  ctx: Awaited<ReturnType<typeof launch>>,
+  emit: RunEmit,
+  signal: AbortSignal
+): Promise<void> {
+  if (ctx.activeDownloads <= 0 || signal.aborted) return;
+  emit.log(`⏳ Waiting for ${ctx.activeDownloads} download(s) to finish saving…`);
+  while (ctx.activeDownloads > 0 && !signal.aborted) {
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  if (!signal.aborted) emit.log('✓ Download(s) finished.');
 }
 
 /** Runs one step. Returns null to continue, or a RunResult to halt the whole run. */

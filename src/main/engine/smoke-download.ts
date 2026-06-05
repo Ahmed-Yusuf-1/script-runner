@@ -34,6 +34,8 @@ async function main() {
       },
       emit
     );
+    // The action returns when the download STARTS; wait for it to finish saving.
+    while (ctx.activeDownloads > 0) await new Promise((r) => setTimeout(r, 50));
     const saved = existsSync(join(dir, 'hello.txt'));
     const recorded = ctx.downloads.some((d) => d.filename === 'hello.txt');
 

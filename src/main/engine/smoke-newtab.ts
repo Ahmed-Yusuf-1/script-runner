@@ -41,6 +41,8 @@ async function main() {
       { id: '1', action: 'download', target: { by: 'text', text: 'Download MP3', match: 'exact' } },
       emit
     );
+    // The action returns on download START; wait for the background save.
+    while (ctx.activeDownloads > 0) await new Promise((r) => setTimeout(r, 50));
     const saved =
       ctx.downloads.some((d) => d.filename === 'fromtab.txt') && existsSync(join(dir, 'fromtab.txt'));
     if (saved) {

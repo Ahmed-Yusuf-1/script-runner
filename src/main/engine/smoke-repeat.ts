@@ -34,6 +34,7 @@ async function main() {
       counterStart: 1,
       counterStep: 1,
       delayMs: 0,
+      waitForDownloads: false,
     },
     variables: {},
     steps: [
