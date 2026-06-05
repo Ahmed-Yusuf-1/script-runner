@@ -1,26 +1,24 @@
 // Turns a Target (how the user described an element) into a Playwright Locator.
 // This is where the "describe the button text" and "main search box" ideas live.
+//
+// Text matching is CASE-INSENSITIVE on purpose: a user shouldn't have to match a
+// button's exact casing (e.g. "Download MP3" should find a "Download Mp3" button).
+// "exact" means the WHOLE text; "contains" means any part of it.
 
 import type { Page, Locator } from 'playwright';
 import type { Target } from '../../shared/types';
 
-/**
- * Resolve a target to a locator. Async because some strategies (searchbox
- * auto-detect, placeholder→label fallback) probe the page to pick the first
- * strategy that actually matches something.
- */
 export async function resolveTarget(page: Page, target: Target): Promise<Locator> {
   switch (target.by) {
     case 'searchbox':
       return resolveSearchbox(page);
 
     case 'placeholder': {
-      // The new feature's "field with this placeholder/label" option.
-      const exact = target.match !== 'contains';
-      const byPlaceholder = page.getByPlaceholder(target.text ?? '', { exact });
+      // "field with this placeholder/label" (fillField).
+      const name = nameMatcher(target.text ?? '', target.match);
+      const byPlaceholder = page.getByPlaceholder(name);
       if ((await byPlaceholder.count()) > 0) return byPlaceholder;
-      // Fall back to an associated <label>.
-      return page.getByLabel(target.text ?? '', { exact });
+      return page.getByLabel(name);
     }
 
     case 'selector':
@@ -28,15 +26,31 @@ export async function resolveTarget(page: Page, target: Target): Promise<Locator
 
     case 'text':
     default: {
-      const exact = target.match !== 'contains';
-      // Prefer a real button/link by accessible name; fall back to any text.
-      const byRole = page.getByRole('button', { name: target.text ?? '', exact });
+      const name = nameMatcher(target.text ?? '', target.match);
+      // Prefer a real button / link by accessible name; fall back to any text.
+      const byRole = page.getByRole('button', { name });
       if ((await byRole.count()) > 0) return byRole;
-      const byLink = page.getByRole('link', { name: target.text ?? '', exact });
+      const byLink = page.getByRole('link', { name });
       if ((await byLink.count()) > 0) return byLink;
-      return page.getByText(target.text ?? '', { exact });
+      return page.getByText(name);
     }
   }
+}
+
+/**
+ * Build a case-insensitive matcher.
+ *  - exact (default): the whole text, ignoring surrounding whitespace & case.
+ *  - contains: any part of the text, ignoring case.
+ */
+function nameMatcher(text: string, match?: 'exact' | 'contains'): RegExp {
+  const body = escapeRegExp(text.trim());
+  return match === 'contains'
+    ? new RegExp(body, 'i')
+    : new RegExp('^\\s*' + body + '\\s*$', 'i');
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 /**
