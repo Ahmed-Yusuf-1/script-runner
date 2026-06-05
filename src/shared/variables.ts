@@ -22,7 +22,11 @@ export function applyVariables(step: Step, vars: Record<string, string>): Step {
     ...step,
     value: substitute(step.value, vars),
     target: step.target
-      ? { ...step.target, text: substitute(step.target.text, vars) }
+      ? {
+          ...step.target,
+          text: substitute(step.target.text, vars),
+          index: substitute(step.target.index, vars),
+        }
       : undefined,
   };
 }
@@ -37,6 +41,7 @@ export function collectVariableNames(steps: Step[]): string[] {
   for (const s of steps) {
     scan(s.value);
     scan(s.target?.text);
+    scan(s.target?.index);
   }
   return [...names];
 }
