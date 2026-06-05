@@ -54,13 +54,24 @@ export function defaultSettings(): Settings {
     headless: false,
     downloadDir: app.getPath('downloads'),
     timeoutMs: 15000,
+    adblock: true,
+    blockPopupWindows: true,
+    blockPopupTabs: true,
+    popupWhitelist: [],
+    persistentSession: true,
   };
 }
 
 export async function getSettings(): Promise<Settings> {
   try {
     const raw = await fs.readFile(settingsFile(), 'utf-8');
-    return { ...defaultSettings(), ...(JSON.parse(raw) as Partial<Settings>) };
+    const parsed = JSON.parse(raw) as Partial<Settings> & { blockPopups?: boolean };
+    const defaults = defaultSettings();
+    if (parsed.blockPopups !== undefined) {
+      if (parsed.blockPopupWindows === undefined) parsed.blockPopupWindows = parsed.blockPopups;
+      if (parsed.blockPopupTabs === undefined) parsed.blockPopupTabs = parsed.blockPopups;
+    }
+    return { ...defaults, ...parsed };
   } catch {
     return defaultSettings();
   }
