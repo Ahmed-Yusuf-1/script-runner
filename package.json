@@ -23,6 +23,7 @@
     "smoke:tabfollow": "tsx src/main/engine/smoke-tabfollow.ts",
     "smoke:closetab": "tsx src/main/engine/smoke-closetab.ts",
     "smoke:whitelist": "tsx src/main/engine/smoke-whitelist.ts",
+    "smoke:dlstart": "tsx src/main/engine/smoke-dlstart.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "postinstall": "playwright install chromium"
   },

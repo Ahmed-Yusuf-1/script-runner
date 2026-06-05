@@ -26,6 +26,10 @@ export interface PageManagerOptions {
   log?: (msg: string) => void;
   /** Called when the engine should switch its active tab to a new page. */
   onActiveTab?: (page: Page) => void;
+  /** Called the moment a download begins. */
+  onDownloadStart?: () => void;
+  /** Called when a download finishes saving (or fails). */
+  onDownloadDone?: () => void;
 }
 
 export function setupPageManager(
@@ -36,18 +40,26 @@ export function setupPageManager(
   const downloads: DownloadRecord[] = [];
   const pagesThatDownloaded = new WeakSet<Page>();
 
-  // Save every download from every page, wherever it happens.
+  // Save every download from every page, wherever it happens. The 'download'
+  // event fires when the download STARTS; saving large files then streams in the
+  // background — so we report "started" right away and "done" once saved.
   const capture = (page: Page) => {
-    page.on('download', async (d: Download) => {
+    page.on('download', (d: Download) => {
       pagesThatDownloaded.add(page);
-      try {
-        const dest = join(opts.downloadDir, d.suggestedFilename());
-        await d.saveAs(dest);
-        downloads.push({ path: dest, filename: d.suggestedFilename() });
-        log(`Saved download: ${d.suggestedFilename()}`);
-      } catch {
-        /* ignore a failed/canceled download */
-      }
+      opts.onDownloadStart?.();
+      log(`Download started: ${d.suggestedFilename()}`);
+      void (async () => {
+        try {
+          const dest = join(opts.downloadDir, d.suggestedFilename());
+          await d.saveAs(dest); // resolves only when the whole file is written
+          downloads.push({ path: dest, filename: d.suggestedFilename() });
+          log(`Saved download: ${d.suggestedFilename()}`);
+        } catch {
+          /* ignore a failed/canceled download */
+        } finally {
+          opts.onDownloadDone?.();
+        }
+      })();
     });
   };
 
@@ -66,6 +78,14 @@ export function setupPageManager(
     const url = safeUrl(page);
     const opener = await page.opener().catch(() => null);
     const openerUrl = opener ? safeUrl(opener) : '';
+
+    // Known ad host → always close, even if same-site/whitelisted. Catches the
+    // pop-under ad tabs these download sites spawn alongside the real page.
+    if ((opts.blockPopupTabs || opts.blockPopupWindows) && isAdHost(url)) {
+      await page.close().catch(() => {});
+      log(`Blocked an ad tab: ${url}`);
+      return;
+    }
 
     let isPopup = false;
     try {

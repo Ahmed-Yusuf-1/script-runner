@@ -23,8 +23,10 @@ export async function enableAdblock(context: BrowserContext, opts: AdblockOption
     const cacheDir = opts.cacheDir ?? defaultCacheDir();
     await mkdir(cacheDir, { recursive: true }).catch(() => {});
     log('Ad blocker: loading filter lists…');
-    const blocker = await PlaywrightBlocker.fromPrebuiltAdsAndTracking(fetch, {
-      path: join(cacheDir, 'adblocker-engine.bin'),
+    // Full set = ads + tracking + annoyances + cosmetic filters (broader than
+    // ads-only, catches more pop-up/interstitial junk on download sites).
+    const blocker = await PlaywrightBlocker.fromPrebuiltFull(fetch, {
+      path: join(cacheDir, 'adblocker-engine-full.bin'),
       read: async (p) => readFile(p),
       write: async (p, data) => writeFile(p, data),
     });
@@ -55,6 +57,11 @@ const AD_HOSTS = [
   'criteo.com', 'pubmatic.com', 'rubiconproject.com', 'openx.net', 'scorecardresearch.com',
   'moatads.com', 'zedo.com', 'adcash.com', 'hilltopads.net', 'clickadu.com', 'a-ads.com',
   'bidvertiser.com', 'smartadserver.com', 'yllix.com', 'admaven.com', 'clksite.com',
+  // More pop-under / redirect ad networks common on file-download sites:
+  'monetag.com', 'adsterra.net', 'highperformanceformat.com', 'profitableratecpm.com',
+  'effectiveratecpm.com', 'pertawee.com', 'galaksion.com', 'adskeeper.com', 'ad-maven.com',
+  'trafficstars.com', 'tsyndicate.com', 'onclickperformance.com', 'popunder.net', 'adnium.com',
+  'propellerclick.com', 'pmsrvc.com', 'displaycontentnetwork.com', 'clickaine.com',
 ];
 
 export function isAdHost(url: string): boolean {

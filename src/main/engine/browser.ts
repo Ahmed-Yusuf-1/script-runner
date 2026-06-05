@@ -15,8 +15,12 @@ export interface RunContext {
   downloadDir: string;
   /** Default action timeout (ms) — used when waiting for downloads, etc. */
   defaultTimeout: number;
-  /** Live list of files downloaded during the run (from any tab). */
+  /** Live list of files that finished saving during the run (from any tab). */
   downloads: DownloadRecord[];
+  /** Count of downloads that have STARTED (the event fired). */
+  downloadsStarted: number;
+  /** Downloads currently in progress (started but not yet fully saved). */
+  activeDownloads: number;
   /** Per-step running counter for "auto-increment item #", keyed by step id. */
   autoIndex: Map<string, number>;
 }
@@ -72,6 +76,8 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     downloadDir: opts.downloadDir,
     defaultTimeout: opts.timeoutMs,
     downloads: [],
+    downloadsStarted: 0,
+    activeDownloads: 0,
     autoIndex: new Map(),
   };
 
@@ -85,6 +91,13 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     log: opts.log,
     onActiveTab: (p) => {
       ctx.page = p;
+    },
+    onDownloadStart: () => {
+      ctx.downloadsStarted += 1;
+      ctx.activeDownloads += 1;
+    },
+    onDownloadDone: () => {
+      ctx.activeDownloads = Math.max(0, ctx.activeDownloads - 1);
     },
   });
 

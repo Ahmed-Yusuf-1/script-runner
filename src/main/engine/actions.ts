@@ -73,18 +73,22 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Wait up to timeoutMs for a new download (from any tab) to be captured. */
-async function waitForNewDownload(
+/**
+ * Wait up to timeoutMs for a new download to START (from any tab). We watch the
+ * "started" counter, not the finished list, so a multi-GB file that takes
+ * minutes to save still counts as success the moment it begins.
+ */
+async function waitForDownloadStart(
   ctx: RunContext,
-  before: number,
+  beforeStarted: number,
   timeoutMs: number
 ): Promise<boolean> {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
-    if (ctx.downloads.length > before) return true;
+    if (ctx.downloadsStarted > beforeStarted) return true;
     await sleep(200);
   }
-  return ctx.downloads.length > before;
+  return ctx.downloadsStarted > beforeStarted;
 }
 
 export async function runAction(ctx: RunContext, step: Step, emit: Emit): Promise<void> {
@@ -184,22 +188,39 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       return;
     }
 
+    case 'closeOtherTabs': {
+      const keep = ctx.page;
+      const others = ctx.context.pages().filter((p) => p !== keep && !p.isClosed());
+      for (const p of others) await p.close().catch(() => {});
+      emit.log(
+        others.length ? `Closed ${others.length} other tab(s).` : 'No other tabs to close.'
+      );
+      return;
+    }
+
     case 'closeAd': {
-      emit.log('Looking for an ad / close button…');
-      const closers = [
-        page.getByRole('button', { name: /close|dismiss|no thanks|skip/i }),
-        page.getByText(/^×$|^✕$|^x$/i),
-        page.locator('[aria-label*="close" i]'),
-      ];
-      for (const c of closers) {
-        try {
-          if (await c.first().isVisible({ timeout: 1500 })) {
-            await c.first().click({ timeout: 1500 });
-            emit.log('Closed an ad.');
-            return;
+      emit.log('Looking for an ad / skip / close button…');
+      // Try the main page AND any iframes (ad overlays often live in iframes).
+      const frames = [page, ...page.frames().map((f) => f)];
+      const skipText = /^\s*(skip ad|skip|continue to (the )?(site|website)|go to (the )?(website|site)|close|dismiss|no thanks|×|✕|x)\s*$/i;
+      for (const f of frames) {
+        const closers = [
+          f.getByRole('button', { name: skipText }),
+          f.getByRole('link', { name: skipText }),
+          f.getByText(skipText),
+          f.locator('[aria-label*="close" i], [class*="close" i], [id*="skip" i], [class*="skip" i]'),
+        ];
+        for (const c of closers) {
+          try {
+            const first = c.first();
+            if (await first.isVisible({ timeout: 800 })) {
+              await first.click({ timeout: 1500 });
+              emit.log('Closed an ad / skipped.');
+              return;
+            }
+          } catch {
+            /* try next strategy */
           }
-        } catch {
-          /* try next strategy */
         }
       }
       emit.log('No ad found (that is okay).');
@@ -234,18 +255,18 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (!step.target) throw new Error('Download: no link/button was specified.');
       if (step.target.autoIncrement) advanceAutoIndex(ctx, step);
       const el = await locate(page, step.target, emit, 'Download');
-      const before = ctx.downloads.length;
-      emit.log(`Clicking "${step.target.text}" and waiting for the download…`);
+      const before = ctx.downloadsStarted;
+      emit.log(`Clicking "${step.target.text}" and waiting for the download to start…`);
       await el.click();
-      const got = await waitForNewDownload(ctx, before, ctx.defaultTimeout);
+      const got = await waitForDownloadStart(ctx, before, ctx.defaultTimeout);
       if (!got) {
         throw new Error(
-          `Download: clicked "${step.target.text}" but no file started downloading within ${Math.round(
+          `Download: clicked "${step.target.text}" but no download started within ${Math.round(
             ctx.defaultTimeout / 1000
-          )}s. The site may need another click first (e.g. a "Convert"/"Prepare" step), or it opened the file in a blocked pop-up.`
+          )}s. The site may need another click first (e.g. a "Continue"/"Start" step), or it opened the file in a blocked pop-up.`
         );
       }
-      emit.log(`Saved ${ctx.downloads[ctx.downloads.length - 1].filename}`);
+      emit.log('Download started (it will keep saving in the background).');
       return;
     }
 
@@ -257,16 +278,16 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (step.target.autoIncrement) advanceAutoIndex(ctx, step);
       const el = await locate(page, step.target, emit, 'Download & wait');
       const waitMs = step.options?.waitMs ?? 1000;
-      const before = ctx.downloads.length;
-      emit.log(`Clicking "${step.target.text}" and waiting up to ${waitMs}ms for the download…`);
+      const before = ctx.downloadsStarted;
+      emit.log(`Clicking "${step.target.text}" and waiting up to ${waitMs}ms for the download to start…`);
       await el.click();
-      const got = await waitForNewDownload(ctx, before, waitMs);
+      const got = await waitForDownloadStart(ctx, before, waitMs);
       if (!got) {
         throw new Error(
-          `Download & wait: clicked "${step.target.text}" but no file arrived within ${waitMs}ms. Try a longer wait, or the file may open in a new tab/pop-up.`
+          `Download & wait: clicked "${step.target.text}" but no download started within ${waitMs}ms. Try a longer wait, or the file may open in a new tab/pop-up.`
         );
       }
-      emit.log(`Saved ${ctx.downloads[ctx.downloads.length - 1].filename}`);
+      emit.log('Download started (it will keep saving in the background).');
       return;
     }
 
