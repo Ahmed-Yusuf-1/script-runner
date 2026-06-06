@@ -11,6 +11,15 @@ export interface ScriptRunnerApi {
   getSettings(): Promise<Settings>;
   saveSettings(settings: Settings): Promise<void>;
 
+  // ---- Presets ----
+  listPresets(): Promise<{ id: string; name: string }[]>;
+  getActivePresetId(): Promise<string | null>;
+  selectPreset(id: string | null): Promise<void>;
+  createPreset(name: string): Promise<string>;
+  deletePreset(id: string): Promise<void>;
+  importPreset(): Promise<string | null>;
+  exportPreset(id: string | null): Promise<boolean>;
+
   runFlow(flow: Flow, vars: Record<string, string>): Promise<RunResult>;
   stopFlow(): Promise<{ ok: boolean }>;
 

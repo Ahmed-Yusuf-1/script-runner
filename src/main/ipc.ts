@@ -11,6 +11,13 @@ import {
   deleteFlow,
   getSettings,
   saveSettings,
+  listPresets,
+  getActivePresetId,
+  selectPreset,
+  createPreset,
+  deletePreset,
+  importPreset,
+  exportPreset,
 } from './storage/flows';
 
 let currentRun: AbortController | null = null;
@@ -24,6 +31,15 @@ export function registerIpc(): void {
   // ---- Settings ----
   ipcMain.handle('settings:get', () => getSettings());
   ipcMain.handle('settings:save', (_e, settings) => saveSettings(settings));
+
+  // ---- Presets ----
+  ipcMain.handle('presets:list', () => listPresets());
+  ipcMain.handle('presets:getActive', () => getActivePresetId());
+  ipcMain.handle('presets:select', (_e, id: string | null) => selectPreset(id));
+  ipcMain.handle('presets:create', (_e, name: string) => createPreset(name));
+  ipcMain.handle('presets:delete', (_e, id: string) => deletePreset(id));
+  ipcMain.handle('presets:import', () => importPreset());
+  ipcMain.handle('presets:export', (_e, id: string | null) => exportPreset(id));
 
   // ---- Running ----
   ipcMain.handle(

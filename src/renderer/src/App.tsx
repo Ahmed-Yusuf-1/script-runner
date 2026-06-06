@@ -28,11 +28,15 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [presets, setPresets] = useState<{ id: string; name: string }[]>([]);
+  const [activePresetId, setActivePresetId] = useState<string | null>(null);
 
-  // Load saved flows + settings, and subscribe to live run events.
+  // Load saved flows, settings, and presets, then subscribe to live run events.
   useEffect(() => {
     window.api.listFlows().then(setFlows);
     window.api.getSettings().then(setSettings);
+    window.api.listPresets().then(setPresets);
+    window.api.getActivePresetId().then(setActivePresetId);
     const offLog = window.api.onLog((msg) => setLogs((prev) => [...prev, msg]));
     const offStatus = window.api.onStatus((s) =>
       setStatuses((prev) => ({ ...prev, [s.id]: s }))
@@ -46,6 +50,55 @@ export function App() {
   const patchFlow = useCallback((patch: Partial<Flow>) => {
     setFlow((f) => ({ ...f, ...patch }));
   }, []);
+
+  // ---- Presets ----
+  const refreshPresets = async () => {
+    const list = await window.api.listPresets();
+    setPresets(list);
+    const activeId = await window.api.getActivePresetId();
+    setActivePresetId(activeId);
+  };
+
+  const handleSelectPreset = async (id: string | null) => {
+    await window.api.selectPreset(id);
+    setActivePresetId(id);
+    const updatedSettings = await window.api.getSettings();
+    setSettings(updatedSettings);
+    const updatedFlows = await window.api.listFlows();
+    setFlows(updatedFlows);
+    if (updatedFlows.length > 0) {
+      selectFlow(updatedFlows[0]);
+    } else {
+      createNew();
+    }
+  };
+
+  const handleCreatePreset = async () => {
+    const name = prompt('Enter a name for the new preset profile (this will copy your current settings and scripts):');
+    if (!name || !name.trim()) return;
+    const newId = await window.api.createPreset(name.trim());
+    await refreshPresets();
+    await handleSelectPreset(newId);
+  };
+
+  const handleDeletePreset = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this preset profile? All saved scripts and settings for this profile will be deleted.')) return;
+    await window.api.deletePreset(id);
+    await refreshPresets();
+    await handleSelectPreset(null);
+  };
+
+  const handleExportPreset = async () => {
+    await window.api.exportPreset(activePresetId);
+  };
+
+  const handleImportPreset = async () => {
+    const newId = await window.api.importPreset();
+    if (newId) {
+      await refreshPresets();
+      await handleSelectPreset(newId);
+    }
+  };
 
   // ---- Step editing ----
   const addStep = () =>
@@ -144,6 +197,39 @@ export function App() {
         <button className="ghost block" onClick={loadDemo}>
           Load demo
         </button>
+
+        <div className="section-label">Preset Profile</div>
+        <div className="preset-selector-row">
+          <select
+            value={activePresetId || ''}
+            onChange={(e) => handleSelectPreset(e.target.value || null)}
+            className="preset-select"
+          >
+            <option value="">Default Profile</option>
+            {presets.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="preset-actions-row">
+          <button className="icon-btn" title="Save Current as New Preset" onClick={handleCreatePreset}>
+            ＋ Save As
+          </button>
+          <button className="icon-btn" title="Import Preset File" onClick={handleImportPreset}>
+            📥 Import
+          </button>
+          <button className="icon-btn" title="Export Current Preset" onClick={handleExportPreset}>
+            📤 Export
+          </button>
+          {activePresetId && (
+            <button className="icon-btn danger" title="Delete Preset" onClick={() => handleDeletePreset(activePresetId)}>
+              🗑 Delete
+            </button>
+          )}
+        </div>
+
         <FlowList
           flows={flows}
           currentId={flow.id}

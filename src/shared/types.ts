@@ -108,6 +108,14 @@ export interface Flow {
   updatedAt: number;
 }
 
+/** A self-contained preset profile. */
+export interface Preset {
+  id: string;
+  name: string;
+  settings: Settings;
+  flows: Flow[];
+}
+
 /** App-wide settings. */
 export interface Settings {
   headless: boolean;

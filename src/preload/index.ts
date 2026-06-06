@@ -13,6 +13,14 @@ const api: ScriptRunnerApi = {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   saveSettings: (settings: Settings) => ipcRenderer.invoke('settings:save', settings),
 
+  listPresets: () => ipcRenderer.invoke('presets:list'),
+  getActivePresetId: () => ipcRenderer.invoke('presets:getActive'),
+  selectPreset: (id: string | null) => ipcRenderer.invoke('presets:select', id),
+  createPreset: (name: string) => ipcRenderer.invoke('presets:create', name),
+  deletePreset: (id: string) => ipcRenderer.invoke('presets:delete', id),
+  importPreset: () => ipcRenderer.invoke('presets:import'),
+  exportPreset: (id: string | null) => ipcRenderer.invoke('presets:export', id),
+
   runFlow: (flow: Flow, vars: Record<string, string>) =>
     ipcRenderer.invoke('run:start', { flow, vars }),
   stopFlow: () => ipcRenderer.invoke('run:stop'),
