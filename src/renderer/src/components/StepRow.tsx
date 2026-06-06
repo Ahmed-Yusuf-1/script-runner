@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { Step, Action, Target, StepStatus } from '@shared/types';
 import { ACTION_LABELS } from '@shared/types';
 
@@ -6,19 +7,21 @@ interface Props {
   total: number;
   step: Step;
   status?: StepStatus;
-  onUpdate: (patch: Partial<Step>) => void;
-  onRemove: () => void;
-  onMove: (dir: -1 | 1) => void;
+  onUpdate: (id: string, patch: Partial<Step>) => void;
+  onRemove: (id: string) => void;
+  onMove: (id: string, dir: -1 | 1) => void;
 }
 
 const ACTIONS = Object.keys(ACTION_LABELS) as Action[];
 
-export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove }: Props) {
+export const StepRow = memo(function StepRow({ index, total, step, status, onUpdate, onRemove, onMove }: Props) {
+  const { id } = step;
+
   const setTarget = (patch: Partial<Target>) =>
-    onUpdate({ target: { ...(step.target ?? { by: 'text' }), ...patch } as Target });
+    onUpdate(id, { target: { ...(step.target ?? { by: 'text' }), ...patch } as Target });
 
   const setOptions = (patch: Partial<NonNullable<Step['options']>>) =>
-    onUpdate({ options: { ...(step.options ?? {}), ...patch } });
+    onUpdate(id, { options: { ...(step.options ?? {}), ...patch } });
 
   const handleActionChange = (action: Action) => {
     const patch: Partial<Step> = { action };
@@ -34,20 +37,20 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
     } else {
       patch.target = undefined;
     }
-    onUpdate(patch);
+    onUpdate(id, patch);
   };
 
   return (
     <div className={'step-row state-' + (status?.state ?? 'idle')}>
       <div className="step-grip">
-        <button className="icon-btn" disabled={index === 0} onClick={() => onMove(-1)} title="Move up">
+        <button className="icon-btn" disabled={index === 0} onClick={() => onMove(id, -1)} title="Move up">
           ▲
         </button>
         <span className="step-num">{index + 1}</span>
         <button
           className="icon-btn"
           disabled={index === total - 1}
-          onClick={() => onMove(1)}
+          onClick={() => onMove(id, 1)}
           title="Move down"
         >
           ▼
@@ -102,7 +105,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
             {statusText(status)}
           </span>
 
-          <button className="icon-btn danger" onClick={onRemove} title="Delete step">
+          <button className="icon-btn danger" onClick={() => onRemove(id)} title="Delete step">
             ✕
           </button>
         </div>
@@ -122,7 +125,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
             className="grow"
             placeholder="example.com  or  https://…"
             value={step.value ?? ''}
-            onChange={(e) => onUpdate({ value: e.target.value })}
+            onChange={(e) => onUpdate(id, { value: e.target.value })}
           />
         );
 
@@ -132,7 +135,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
             className="grow"
             placeholder="e.g. Inception movie   (supports {{variables}})"
             value={step.value ?? ''}
-            onChange={(e) => onUpdate({ value: e.target.value })}
+            onChange={(e) => onUpdate(id, { value: e.target.value })}
           />
         );
 
@@ -158,7 +161,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
               className="grow"
               placeholder="text to type   (supports {{variables}})"
               value={step.value ?? ''}
-              onChange={(e) => onUpdate({ value: e.target.value })}
+              onChange={(e) => onUpdate(id, { value: e.target.value })}
             />
             <label className="check">
               <input
@@ -260,7 +263,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
             className="grow"
             placeholder="Enter, Escape, Tab, ArrowDown…"
             value={step.value ?? ''}
-            onChange={(e) => onUpdate({ value: e.target.value })}
+            onChange={(e) => onUpdate(id, { value: e.target.value })}
           />
         );
 
@@ -271,7 +274,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
             type="number"
             placeholder="1000"
             value={step.value ?? ''}
-            onChange={(e) => onUpdate({ value: e.target.value })}
+            onChange={(e) => onUpdate(id, { value: e.target.value })}
           />
         );
 
@@ -281,7 +284,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
             className="grow"
             placeholder="result.png"
             value={step.value ?? ''}
-            onChange={(e) => onUpdate({ value: e.target.value })}
+            onChange={(e) => onUpdate(id, { value: e.target.value })}
           />
         );
 
@@ -307,7 +310,7 @@ export function StepRow({ index, total, step, status, onUpdate, onRemove, onMove
         return null;
     }
   }
-}
+});
 
 function statusText(status?: StepStatus): string {
   switch (status?.state) {

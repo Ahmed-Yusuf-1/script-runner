@@ -6,6 +6,7 @@ out/
 dist/
 build/
 release/
+playwright-browsers/
 *.tsbuildinfo
 
 # Caches

@@ -4,6 +4,10 @@ import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
 import { registerIpc } from './ipc';
 
+if (app.isPackaged) {
+  process.env.PLAYWRIGHT_BROWSERS_PATH = join(process.resourcesPath, 'playwright-browsers');
+}
+
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1150,

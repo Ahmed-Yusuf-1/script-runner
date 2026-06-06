@@ -52,14 +52,14 @@ export function App() {
   }, []);
 
   // ---- Presets ----
-  const refreshPresets = async () => {
+  const refreshPresets = useCallback(async () => {
     const list = await window.api.listPresets();
     setPresets(list);
     const activeId = await window.api.getActivePresetId();
     setActivePresetId(activeId);
-  };
+  }, []);
 
-  const handleSelectPreset = async (id: string | null) => {
+  const handleSelectPreset = useCallback(async (id: string | null) => {
     await window.api.selectPreset(id);
     setActivePresetId(id);
     const updatedSettings = await window.api.getSettings();
@@ -67,85 +67,113 @@ export function App() {
     const updatedFlows = await window.api.listFlows();
     setFlows(updatedFlows);
     if (updatedFlows.length > 0) {
-      selectFlow(updatedFlows[0]);
+      setFlow(structuredClone(updatedFlows[0]));
+      setStatuses({});
     } else {
-      createNew();
+      setFlow(newFlow());
+      setStatuses({});
     }
-  };
+  }, []);
 
-  const handleCreatePreset = async () => {
+  const handleCreatePreset = useCallback(async () => {
     const name = prompt('Enter a name for the new preset profile (this will copy your current settings and scripts):');
     if (!name || !name.trim()) return;
     const newId = await window.api.createPreset(name.trim());
     await refreshPresets();
     await handleSelectPreset(newId);
-  };
+  }, [refreshPresets, handleSelectPreset]);
 
-  const handleDeletePreset = async (id: string) => {
+  const handleDeletePreset = useCallback(async (id: string) => {
     if (!confirm('Are you sure you want to delete this preset profile? All saved scripts and settings for this profile will be deleted.')) return;
     await window.api.deletePreset(id);
     await refreshPresets();
     await handleSelectPreset(null);
-  };
+  }, [refreshPresets, handleSelectPreset]);
 
-  const handleExportPreset = async () => {
+  const handleExportPreset = useCallback(async () => {
     await window.api.exportPreset(activePresetId);
-  };
+  }, [activePresetId]);
 
-  const handleImportPreset = async () => {
+  const handleImportPreset = useCallback(async () => {
     const newId = await window.api.importPreset();
     if (newId) {
       await refreshPresets();
       await handleSelectPreset(newId);
     }
-  };
+  }, [refreshPresets, handleSelectPreset]);
 
   // ---- Step editing ----
-  const addStep = () =>
-    patchFlow({ steps: [...flow.steps, { id: uid(), action: 'goto', value: '' }] });
+  const addStep = useCallback(() => {
+    setFlow((f) => ({
+      ...f,
+      steps: [...f.steps, { id: uid(), action: 'goto', value: '' }],
+    }));
+  }, []);
 
-  const updateStep = (id: string, patch: Partial<Step>) =>
-    patchFlow({
-      steps: flow.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+  const updateStep = useCallback((id: string, patch: Partial<Step>) => {
+    setFlow((f) => ({
+      ...f,
+      steps: f.steps.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+    }));
+  }, []);
+
+  const removeStep = useCallback((id: string) => {
+    setFlow((f) => ({
+      ...f,
+      steps: f.steps.filter((s) => s.id !== id),
+    }));
+  }, []);
+
+  const moveStep = useCallback((id: string, dir: -1 | 1) => {
+    setFlow((f) => {
+      const i = f.steps.findIndex((s) => s.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= f.steps.length) return f;
+      const steps = [...f.steps];
+      [steps[i], steps[j]] = [steps[j], steps[i]];
+      return { ...f, steps };
     });
-
-  const removeStep = (id: string) =>
-    patchFlow({ steps: flow.steps.filter((s) => s.id !== id) });
-
-  const moveStep = (id: string, dir: -1 | 1) => {
-    const i = flow.steps.findIndex((s) => s.id === id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= flow.steps.length) return;
-    const steps = [...flow.steps];
-    [steps[i], steps[j]] = [steps[j], steps[i]];
-    patchFlow({ steps });
-  };
+  }, []);
 
   // ---- Flow management ----
-  const refreshFlows = () => window.api.listFlows().then(setFlows);
+  const refreshFlows = useCallback(() => {
+    window.api.listFlows().then(setFlows);
+  }, []);
 
-  const saveCurrent = async () => {
+  const saveCurrent = useCallback(async () => {
     await window.api.saveFlow(flow);
-    await refreshFlows();
-  };
+    setFlows((prev) => {
+      const index = prev.findIndex((f) => f.id === flow.id);
+      const updated = [...prev];
+      if (index >= 0) {
+        updated[index] = flow;
+      } else {
+        updated.unshift(flow);
+      }
+      return updated.sort((a, b) => b.updatedAt - a.updatedAt);
+    });
+  }, [flow]);
 
-  const selectFlow = (f: Flow) => {
+  const selectFlow = useCallback((f: Flow) => {
     setFlow(structuredClone(f));
     setStatuses({});
-  };
+  }, []);
 
-  const createNew = () => {
+  const createNew = useCallback(() => {
     setFlow(newFlow());
     setStatuses({});
-  };
+  }, []);
 
-  const deleteFlow = async (id: string) => {
+  const deleteFlow = useCallback(async (id: string) => {
     await window.api.deleteFlow(id);
-    if (flow.id === id) createNew();
-    await refreshFlows();
-  };
+    setFlow((f) => {
+      if (f.id === id) return newFlow();
+      return f;
+    });
+    setFlows((prev) => prev.filter((f) => f.id !== id));
+  }, []);
 
-  const loadDemo = () => {
+  const loadDemo = useCallback(() => {
     setFlow({
       id: uid(),
       name: 'Demo: search Wikipedia',
@@ -166,10 +194,10 @@ export function App() {
       updatedAt: Date.now(),
     });
     setStatuses({});
-  };
+  }, []);
 
   // ---- Running ----
-  const run = async () => {
+  const run = useCallback(async () => {
     if (!flow.steps.length) {
       setLogs(['Add at least one step first.']);
       return;
@@ -183,9 +211,11 @@ export function App() {
     } finally {
       setRunning(false);
     }
-  };
+  }, [flow]);
 
-  const stop = () => window.api.stopFlow();
+  const stop = useCallback(() => {
+    window.api.stopFlow();
+  }, []);
 
   return (
     <div className="app">

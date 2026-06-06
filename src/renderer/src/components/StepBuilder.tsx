@@ -32,9 +32,9 @@ export function StepBuilder({ steps, statuses, onAdd, onUpdate, onRemove, onMove
             total={steps.length}
             step={step}
             status={statuses[step.id]}
-            onUpdate={(patch) => onUpdate(step.id, patch)}
-            onRemove={() => onRemove(step.id)}
-            onMove={(dir) => onMove(step.id, dir)}
+            onUpdate={onUpdate}
+            onRemove={onRemove}
+            onMove={onMove}
           />
         ))}
       </div>
