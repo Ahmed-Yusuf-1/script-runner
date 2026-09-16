@@ -24,6 +24,7 @@
     "smoke:closetab": "tsx src/main/engine/smoke-closetab.ts",
     "smoke:whitelist": "tsx src/main/engine/smoke-whitelist.ts",
     "smoke:dlstart": "tsx src/main/engine/smoke-dlstart.ts",
+    "smoke:offline": "npm run smoke:repeat && npm run smoke:download && npm run smoke:newtab && npm run smoke:match && npm run smoke:back && npm run smoke:nth && npm run smoke:autoinc && npm run smoke:waitafter && npm run smoke:tabfollow && npm run smoke:closetab && npm run smoke:whitelist && npm run smoke:dlstart",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "postinstall": "playwright install chromium",
     "install-browsers": "node -e \"process.env.PLAYWRIGHT_BROWSERS_PATH='playwright-browsers'; require('child_process').execSync('npx playwright install chromium', {stdio: 'inherit'})\"",

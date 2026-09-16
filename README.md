@@ -4,6 +4,8 @@
 
 Script Runner is a desktop app for repeatable browser work. You describe each step in plain terms, such as *go to this link*, *click the button that says "Download"*, or *type into the search box*, and it runs the steps in a real Chromium browser with Playwright. It handles the interruptions that usually break automation: pop-up tabs, ads, downloads that open new pages, and sites that close the tab you were on.
 
+[![CI](https://github.com/Ahmed-Yusuf-1/script-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/Ahmed-Yusuf-1/script-runner/actions/workflows/ci.yml)
+
 > **Status: alpha (v0.1.0).** It works and is covered by engine smoke tests, but expect rough edges. Windows is the only packaged build so far.
 
 ## Download
@@ -133,6 +135,7 @@ npm run typecheck    # TypeScript, strict mode
 Each engine behavior has a headless smoke test that prints `PASS` or `FAIL`. Most run against local pages; `smoke`, `smoke:adblock` and `smoke:profile` need an internet connection.
 
 ```bash
+npm run smoke:offline    # every test that runs against local pages (what CI runs)
 npm run smoke            # type into a real site's search box
 npm run smoke:repeat     # repeat ranges and the counter
 npm run smoke:download   # download capture
