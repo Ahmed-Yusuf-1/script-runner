@@ -8,6 +8,15 @@ Script Runner is a desktop app for repeatable browser work. You describe each st
 
 > **Status: alpha (v0.1.0).** It works and is covered by engine smoke tests, but expect rough edges. Windows is the only packaged build so far.
 
+![Script Runner step builder showing a five-step flow after a successful run](docs/screenshots/step-builder.webp)
+
+<details>
+<summary>Repeat settings and the live run log</summary>
+
+![Repeat panel with an {{n}} counter and a run log streaming three downloads](docs/screenshots/run-log.webp)
+
+</details>
+
 ## Download
 
 **[Download the Windows installer (v0.1.0-alpha)](https://github.com/Ahmed-Yusuf-1/script-runner/releases/tag/v0.1.0-alpha)**
