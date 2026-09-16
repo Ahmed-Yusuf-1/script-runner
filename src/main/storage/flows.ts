@@ -1,4 +1,5 @@
 import { app, dialog, BrowserWindow } from 'electron';
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron';
 import { join } from 'path';
 import { promises as fs } from 'fs';
 import { randomUUID } from 'crypto';
@@ -249,15 +250,18 @@ export async function exportPreset(id: string | null): Promise<boolean> {
     flows = await listFlows();
   }
 
-  const win = BrowserWindow.getFocusedWindow() || undefined;
-
-  const { filePath } = await dialog.showSaveDialog(win, {
+  const saveOptions: SaveDialogOptions = {
     title: 'Export Preset',
     defaultPath: `${name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.preset.json`,
     filters: [
       { name: 'Script Runner Preset', extensions: ['json'] }
     ]
-  });
+  };
+  // Attach the dialog to the focused window when there is one.
+  const win = BrowserWindow.getFocusedWindow();
+  const { filePath } = win
+    ? await dialog.showSaveDialog(win, saveOptions)
+    : await dialog.showSaveDialog(saveOptions);
 
   if (!filePath) return false;
 
@@ -274,15 +278,17 @@ export async function exportPreset(id: string | null): Promise<boolean> {
 }
 
 export async function importPreset(): Promise<string | null> {
-  const win = BrowserWindow.getFocusedWindow() || undefined;
-
-  const { filePaths } = await dialog.showOpenDialog(win, {
+  const openOptions: OpenDialogOptions = {
     title: 'Import Preset',
     filters: [
       { name: 'Script Runner Preset', extensions: ['json'] }
     ],
     properties: ['openFile']
-  });
+  };
+  const win = BrowserWindow.getFocusedWindow();
+  const { filePaths } = win
+    ? await dialog.showOpenDialog(win, openOptions)
+    : await dialog.showOpenDialog(openOptions);
 
   if (!filePaths || filePaths.length === 0) return null;
 
