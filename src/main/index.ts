@@ -1,6 +1,6 @@
 // Electron main entry: creates the window, wires up IPC, manages app lifecycle.
 
-import { app, BrowserWindow, Menu, shell, nativeTheme, screen } from 'electron';
+import { app, BrowserWindow, Menu, shell, nativeTheme, screen, dialog } from 'electron';
 import type { MenuItemConstructorOptions } from 'electron';
 import { join } from 'path';
 import { registerIpc, shutdown, applyTheme } from './ipc';
@@ -10,6 +10,10 @@ import { readJson, writeJsonAtomic } from './storage/fsutil';
 
 if (app.isPackaged) {
   process.env.PLAYWRIGHT_BROWSERS_PATH = join(process.resourcesPath, 'playwright-browsers');
+}
+// Lets tests (and power users) keep data somewhere other than the default folder.
+if (process.env.SCRIPT_RUNNER_USER_DATA) {
+  app.setPath('userData', process.env.SCRIPT_RUNNER_USER_DATA);
 }
 
 const REPO_URL = 'https://github.com/Ahmed-Yusuf-1/script-runner';
@@ -106,6 +110,19 @@ async function createWindow(): Promise<void> {
   });
   win.webContents.on('will-navigate', (e, url) => {
     if (url !== win.webContents.getURL()) e.preventDefault();
+  });
+  // The UI blocks unloading while a flow has unsaved changes; ask before closing.
+  win.webContents.on('will-prevent-unload', (e) => {
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'question',
+      buttons: ['Close without saving', 'Keep editing'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Unsaved changes',
+      message: 'This flow has unsaved changes.',
+      detail: 'If you close now, your changes will be lost.',
+    });
+    if (choice === 0) e.preventDefault(); // preventDefault here means "unload anyway"
   });
 
   // electron-vite serves the renderer from a dev URL in dev, and from a built
