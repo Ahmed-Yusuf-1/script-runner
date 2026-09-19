@@ -1,15 +1,19 @@
 {
   "name": "script-runner",
-  "version": "0.1.0",
-  "description": "GUI script runner — build automation flows and run them with Playwright",
+  "version": "0.2.0",
+  "description": "Desktop app for building browser automations step by step, without code, and running them with Playwright",
   "main": "./out/main/index.js",
-  "author": "",
+  "author": "Ahmed Yusuf",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "preview": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test && npm run build",
     "smoke": "tsx src/main/engine/smoke.ts",
+    "smoke:offline": "npm run smoke:repeat && npm run smoke:download && npm run smoke:newtab && npm run smoke:match && npm run smoke:back && npm run smoke:nth && npm run smoke:autoinc && npm run smoke:waitafter && npm run smoke:tabfollow && npm run smoke:closetab && npm run smoke:whitelist && npm run smoke:dlstart && npm run smoke:actions2 && npm run smoke:control && npm run smoke:dlname",
     "smoke:repeat": "tsx src/main/engine/smoke-repeat.ts",
     "smoke:download": "tsx src/main/engine/smoke-download.ts",
     "smoke:adblock": "tsx src/main/engine/smoke-adblock.ts",
@@ -24,11 +28,15 @@
     "smoke:closetab": "tsx src/main/engine/smoke-closetab.ts",
     "smoke:whitelist": "tsx src/main/engine/smoke-whitelist.ts",
     "smoke:dlstart": "tsx src/main/engine/smoke-dlstart.ts",
-    "smoke:offline": "npm run smoke:repeat && npm run smoke:download && npm run smoke:newtab && npm run smoke:match && npm run smoke:back && npm run smoke:nth && npm run smoke:autoinc && npm run smoke:waitafter && npm run smoke:tabfollow && npm run smoke:closetab && npm run smoke:whitelist && npm run smoke:dlstart",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
     "postinstall": "playwright install chromium",
     "install-browsers": "node -e \"process.env.PLAYWRIGHT_BROWSERS_PATH='playwright-browsers'; require('child_process').execSync('npx playwright install chromium', {stdio: 'inherit'})\"",
-    "dist": "npm run build && npm run install-browsers && electron-builder"
+    "dist": "npm run build && npm run install-browsers && electron-builder",
+    "smoke:actions2": "tsx src/main/engine/smoke-actions2.ts",
+    "smoke:control": "tsx src/main/engine/smoke-control.ts",
+    "smoke:dlname": "tsx src/main/engine/smoke-dlname.ts",
+    "dist:win": "npm run build && npm run install-browsers && electron-builder --win",
+    "dist:mac": "npm run build && npm run install-browsers && electron-builder --mac",
+    "dist:linux": "npm run build && npm run install-browsers && electron-builder --linux"
   },
   "dependencies": {
     "@ghostery/adblocker-playwright": "^2.17.3",
@@ -54,7 +62,8 @@
     "appId": "com.ahmed.scriptrunner",
     "productName": "Script Runner",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "out/**/*",
@@ -70,12 +79,33 @@
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.png"
     },
     "nsis": {
-      "oneClick": true,
-      "allowToChangeInstallationDirectory": false,
-      "createDesktopShortcut": true
-    }
-  }
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Script Runner"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "maintainer": "Ahmed Yusuf",
+      "synopsis": "Browser automations without code"
+    },
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}"
+  },
+  "homepage": "https://github.com/Ahmed-Yusuf-1/script-runner"
 }

@@ -8,7 +8,7 @@ on:
 jobs:
   verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       # The engine tests drive Playwright directly; the Electron binary isn't needed.
       ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -21,6 +21,8 @@ jobs:
       - run: npm ci
       - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
       # Smoke tests that run against local pages. `smoke`, `smoke:adblock` and
       # `smoke:profile` reach real websites, so they stay manual to keep CI stable.
       - run: npm run smoke:offline

@@ -46,8 +46,9 @@ export function useRun(): RunApi {
 
     // A run may still be going from before a reload: follow it until it ends.
     let poll: number | undefined;
+    let live = true;
     void window.api.getRunState().then((st) => {
-      if (!st.running) return;
+      if (!live || !st.running) return;
       setRunning(true);
       setFlowId(st.flowId ?? null);
       if (st.progress) setProgress(st.progress);
@@ -61,6 +62,7 @@ export function useRun(): RunApi {
     });
 
     return () => {
+      live = false;
       offLog();
       offStatus();
       offProgress();

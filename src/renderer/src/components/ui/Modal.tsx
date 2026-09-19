@@ -35,6 +35,9 @@ export function Modal({ title, subtitle, onClose, children, footer, width = 480,
     first?.focus();
 
     const onKey = (e: KeyboardEvent) => {
+      // With stacked dialogs (a confirm over Settings), only the top one handles keys.
+      const backdrops = document.querySelectorAll('.modal-backdrop');
+      if (panel && backdrops[backdrops.length - 1] !== panel.parentElement) return;
       if (e.key === 'Escape') {
         e.stopPropagation();
         onCloseRef.current();

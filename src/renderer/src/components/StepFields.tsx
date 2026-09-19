@@ -1,7 +1,7 @@
 // The inputs on a step card, driven by ACTION_META: which element the step
 // targets, and the step's main value.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Step, Target, StepOptions } from '@shared/types';
 import { ACTION_META } from '@shared/actions';
 
@@ -29,7 +29,11 @@ export function SecondsInput({
 }) {
   const shown = ms == null ? '' : String(Math.round(ms) / 1000);
   const [text, setText] = useState(shown);
-  useEffect(() => setText(shown), [shown]);
+  const focused = useRef(false);
+  // Follow outside changes (undo, another field), but never rewrite what's being typed ("1." → "1").
+  useEffect(() => {
+    if (!focused.current) setText(shown);
+  }, [shown]);
   return (
     <span className="unit-input">
       <input
@@ -48,7 +52,11 @@ export function SecondsInput({
             if (Number.isFinite(n) && n >= 0) onChange(Math.round(n * 1000));
           }
         }}
-        onBlur={() => setText(shown)}
+        onFocus={() => (focused.current = true)}
+        onBlur={() => {
+          focused.current = false;
+          setText(shown);
+        }}
       />
       <span className="unit">s</span>
     </span>
