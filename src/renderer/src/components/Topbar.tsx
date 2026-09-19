@@ -41,7 +41,7 @@ export function Topbar(p: Props) {
   const pct =
     pr && pr.stepCount > 0 && pr.stepIndex >= 0
       ? pr.passes && pr.pass
-        ? Math.min(99, ((pr.pass - 1) / pr.passes) * 100 + (1 / pr.passes) * 100 * 0.5)
+        ? Math.min(99, ((pr.pass - 1 + pr.stepIndex / pr.stepCount) / pr.passes) * 100)
         : Math.min(99, (pr.stepIndex / pr.stepCount) * 100)
       : 2;
 
