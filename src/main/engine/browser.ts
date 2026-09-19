@@ -3,9 +3,11 @@
 
 import { chromium } from 'playwright';
 import type { Browser, BrowserContext, Page } from 'playwright';
+import type { LogLevel, SavedFile } from '../../shared/types';
 import { enableAdblock } from './adblock';
 import { setupPageManager } from './pages';
-import type { DownloadRecord } from './pages';
+
+export type LogFn = (msg: string, level?: LogLevel) => void;
 
 export interface RunContext {
   /** Null when using a persistent profile (close the context instead). */
@@ -15,14 +17,22 @@ export interface RunContext {
   downloadDir: string;
   /** Default action timeout (ms) — used when waiting for downloads, etc. */
   defaultTimeout: number;
+  /** Timeout for the step that's running (its override, or the default). */
+  stepTimeout: number;
   /** Live list of files that finished saving during the run (from any tab). */
-  downloads: DownloadRecord[];
+  downloads: SavedFile[];
   /** Count of downloads that have STARTED (the event fired). */
   downloadsStarted: number;
   /** Downloads currently in progress (started but not yet fully saved). */
   activeDownloads: number;
   /** Per-step running counter for "auto-increment item #", keyed by step id. */
   autoIndex: Map<string, number>;
+  /** Variables produced during the run ("Save text as variable"). */
+  runVars: Record<string, string>;
+  /** Screenshots taken during the run (by steps or on error). */
+  screenshots: SavedFile[];
+  /** Aborted when the user presses Stop. */
+  signal?: AbortSignal;
 }
 
 export interface LaunchOptions {
@@ -41,30 +51,38 @@ export interface LaunchOptions {
   cacheDir?: string;
   /** Keep a persistent browser profile at this directory (remembers cookies/logins). */
   profileDir?: string;
+  /** Pause (ms) before every browser action, so a visible run is easy to follow. */
+  slowMoMs?: number;
   /** Optional sink for engine log lines (ad-block status, downloads, etc.). */
-  log?: (msg: string) => void;
+  log?: LogFn;
+  signal?: AbortSignal;
 }
 
+const LAUNCH_ARGS = {
+  ignoreDefaultArgs: ['--enable-automation'],
+  args: ['--disable-blink-features=AutomationControlled'],
+};
 
 export async function launch(opts: LaunchOptions): Promise<RunContext> {
   let browser: Browser | null = null;
   let context: BrowserContext;
+  const slowMo = opts.slowMoMs && opts.slowMoMs > 0 ? opts.slowMoMs : undefined;
 
-  if (opts.profileDir) {
-    // Persistent profile: cookies, logins and "I am a human" tokens survive runs.
-    context = await chromium.launchPersistentContext(opts.profileDir, {
-      headless: opts.headless,
-      acceptDownloads: true,
-      ignoreDefaultArgs: ['--enable-automation'],
-      args: ['--disable-blink-features=AutomationControlled'],
-    });
-  } else {
-    browser = await chromium.launch({
-      headless: opts.headless,
-      ignoreDefaultArgs: ['--enable-automation'],
-      args: ['--disable-blink-features=AutomationControlled'],
-    });
-    context = await browser.newContext({ acceptDownloads: true });
+  try {
+    if (opts.profileDir) {
+      // Persistent profile: cookies, logins and "I am a human" tokens survive runs.
+      context = await chromium.launchPersistentContext(opts.profileDir, {
+        headless: opts.headless,
+        acceptDownloads: true,
+        slowMo,
+        ...LAUNCH_ARGS,
+      });
+    } else {
+      browser = await chromium.launch({ headless: opts.headless, slowMo, ...LAUNCH_ARGS });
+      context = await browser.newContext({ acceptDownloads: true });
+    }
+  } catch (err) {
+    throw new Error(explainLaunchError(err, !!opts.profileDir));
   }
   context.setDefaultTimeout(opts.timeoutMs);
   const page = context.pages()[0] ?? (await context.newPage());
@@ -75,15 +93,19 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     page,
     downloadDir: opts.downloadDir,
     defaultTimeout: opts.timeoutMs,
+    stepTimeout: opts.timeoutMs,
     downloads: [],
     downloadsStarted: 0,
     activeDownloads: 0,
     autoIndex: new Map(),
+    runVars: {},
+    screenshots: [],
+    signal: opts.signal,
   };
 
   // Always capture downloads (from any tab); follow real new tabs; close ad
   // pop-ups only if asked. onActiveTab switches the engine's active page.
-  ctx.downloads = setupPageManager(context, {
+  setupPageManager(context, {
     downloadDir: opts.downloadDir,
     blockPopupWindows: opts.blockPopupWindows ?? false,
     blockPopupTabs: opts.blockPopupTabs ?? false,
@@ -96,6 +118,9 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
       ctx.downloadsStarted += 1;
       ctx.activeDownloads += 1;
     },
+    onDownloadSaved: (file) => {
+      ctx.downloads.push(file);
+    },
     onDownloadDone: () => {
       ctx.activeDownloads = Math.max(0, ctx.activeDownloads - 1);
     },
@@ -105,9 +130,21 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     enabled: opts.adblock ?? false,
     cacheDir: opts.cacheDir,
     log: opts.log,
-  }).catch((e) => opts.log?.('Ad blocker setup failed: ' + (e?.message ?? e)));
+  }).catch((e) => opts.log?.('Ad blocker setup failed: ' + (e?.message ?? e), 'warn'));
 
   return ctx;
+}
+
+/** Turn the most common launch failures into something a user can act on. */
+function explainLaunchError(err: unknown, persistent: boolean): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  if (/Executable doesn't exist|browserType\.launch.*install/i.test(msg)) {
+    return 'The automation browser (Chromium) is not installed. From the project folder, run: npx playwright install chromium';
+  }
+  if (persistent && /ProcessSingleton|profile.*in use|user data directory is already in use/i.test(msg)) {
+    return 'The saved browser profile is in use by another run or Chromium window. Close it and try again, or turn off "Remember logins" in Settings.';
+  }
+  return 'Could not start the browser: ' + msg.split('\n')[0];
 }
 
 export async function close(ctx: RunContext): Promise<void> {

@@ -6,20 +6,12 @@ import { mkdtempSync, existsSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { runFlow } from './runner';
-import type { Flow, Settings } from '../../shared/types';
+import type { Flow } from '../../shared/types';
+import { testSettings } from './testkit';
 
 async function main() {
   const dir = mkdtempSync(join(tmpdir(), 'sr-smoke-'));
-  const settings: Settings = {
-    headless: true,
-    downloadDir: dir,
-    timeoutMs: 15000,
-    adblock: false,
-    blockPopupWindows: false,
-    blockPopupTabs: false,
-    popupWhitelist: [],
-    persistentSession: false,
-  };
+  const settings = testSettings(dir);
 
   // Steps: 1 = before (once), 2 = looped, 3 = after (once). Repeat only step 2, 3x.
   const flow: Flow = {

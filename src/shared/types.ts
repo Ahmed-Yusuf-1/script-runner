@@ -1,21 +1,33 @@
 // The single source of truth for the data model. Imported by both the engine
-// (main process) and the GUI (renderer). Beginner mode and, later, recorder mode
-// both produce a Flow that looks exactly like this.
+// (main process) and the GUI (renderer), so the two can't drift apart.
+//
+// Compatibility rule: every field added after v0.1 is optional or gets a default
+// in normalize.ts, so flows, presets and settings saved by older versions load.
+
+/** Bumped when the saved shape changes in a way normalize.ts has to migrate. */
+export const SCHEMA_VERSION = 2;
 
 export type Action =
   | 'goto' // navigate to a URL
   | 'back' // go back to the previous page
+  | 'reload' // reload the current page
   | 'search' // open Google and search
-  | 'fillField' // type into a text field / search box on the CURRENT page (NEW)
+  | 'fillField' // type into a text field / search box on the current page
   | 'click' // click an element
+  | 'hover' // move the mouse over an element (opens hover menus)
+  | 'selectOption' // pick an option in a <select> dropdown
+  | 'pressKey' // press a keyboard key (Enter, Escape, …)
+  | 'scroll' // scroll the page
+  | 'waitFor' // wait until an element / text appears (or disappears)
+  | 'assertText' // check the page shows (or doesn't show) some text
+  | 'extractText' // read an element's text into a {{variable}}
   | 'closeAd' // best-effort: dismiss a popup/ad
   | 'closeTab' // close the current tab and return to the previous one
   | 'closeOtherTabs' // close every tab except the current one (clears pop-unders)
-  | 'pressKey' // press a keyboard key (Enter, Escape, …)
   | 'wait' // pause for N milliseconds
   | 'screenshot' // capture the page
   | 'download' // click something and save the file it downloads
-  | 'downloadWait'; // same as download, then wait N ms — handy in a repeat loop
+  | 'downloadWait'; // same as download, with its own time limit for the file to start
 
 /** How to locate an element on the page. */
 export interface Target {
@@ -24,7 +36,7 @@ export interface Target {
   text?: string;
   /** For text matching: whole-text vs. partial. Defaults to exact. */
   match?: 'exact' | 'contains';
-  /** A CSS selector captured by the picker/recorder (later phases). */
+  /** A CSS selector, used when `by` is 'selector'. */
   selector?: string;
   /**
    * When several elements match (e.g. many "Download Mp3" buttons), pick the
@@ -40,26 +52,40 @@ export interface Target {
   autoIncrement?: boolean;
 }
 
+export interface StepOptions {
+  /** fillField: press Enter after typing (most search boxes need this). */
+  pressEnter?: boolean;
+  /** What to do if this step fails (after any retries). Defaults to 'stop'. */
+  onError?: 'stop' | 'continue';
+  /** Override the default per-step timeout (ms). */
+  timeoutMs?: number;
+  /** downloadWait: how long (ms) to wait for the download to start. */
+  waitMs?: number;
+  /** Optional pause AFTER this step finishes (ms). Blank/0 = no pause. */
+  waitAfterMs?: number;
+  /** Extra attempts after a failure before the step counts as failed. */
+  retries?: number;
+  /** waitFor: wait for the element to appear (default) or to go away. */
+  waitState?: 'visible' | 'hidden';
+  /** assertText: the text must be on the page (default) or must not be. */
+  expect?: 'present' | 'absent';
+}
+
 /** One step in a flow. */
 export interface Step {
   id: string;
   action: Action;
   /** URL / query / text-to-type / milliseconds / file name, depending on action. */
   value?: string;
-  /** For click, fillField, download. */
+  /** For actions that act on an element. */
   target?: Target;
-  options?: {
-    /** fillField: press Enter after typing (most search boxes need this). */
-    pressEnter?: boolean;
-    /** What to do if this step fails. Defaults to 'stop'. */
-    onError?: 'stop' | 'continue';
-    /** Override the default per-step timeout. */
-    timeoutMs?: number;
-    /** downloadWait: milliseconds to wait after the download finishes. */
-    waitMs?: number;
-    /** Optional pause AFTER this step finishes (ms). Blank/0 = no pause. */
-    waitAfterMs?: number;
-  };
+  /** extractText: the variable name the text is saved into (no braces). */
+  saveAs?: string;
+  /** A disabled step is kept in the flow but skipped when it runs. */
+  disabled?: boolean;
+  /** Free-form note shown on the step card. */
+  note?: string;
+  options?: StepOptions;
 }
 
 /**
@@ -97,7 +123,7 @@ export interface Flow {
   name: string;
   /**
    * Configurable input fields. Steps reference them with {{name}} placeholders,
-   * and the Run panel lets the user fill them before running — so one flow is
+   * and the Inputs panel lets the user fill them before running, so one flow is
    * reusable with different inputs (e.g. a different search query each time).
    */
   variables?: Record<string, string>;
@@ -106,6 +132,8 @@ export interface Flow {
   steps: Step[];
   createdAt: number;
   updatedAt: number;
+  /** Shape version this flow was saved with. */
+  schemaVersion?: number;
 }
 
 /** A self-contained preset profile. */
@@ -116,7 +144,9 @@ export interface Preset {
   flows: Flow[];
 }
 
-/** App-wide settings. */
+export type Theme = 'system' | 'dark' | 'light';
+
+/** App-wide settings (per preset when a preset is active). */
 export interface Settings {
   headless: boolean;
   downloadDir: string;
@@ -138,7 +168,15 @@ export interface Settings {
    * across runs, so checks solved once are remembered.
    */
   persistentSession: boolean;
+  /** Pause (ms) Playwright adds before every browser action, for watching runs. */
+  slowMoMs: number;
+  /** Save a screenshot of the page when a step fails. */
+  screenshotOnError: boolean;
+  /** UI theme. */
+  theme: Theme;
 }
+
+// ---- Running ----
 
 /** Live status of a step during a run, streamed to the UI. */
 export type StepState = 'running' | 'ok' | 'warn' | 'error' | 'skipped';
@@ -146,27 +184,94 @@ export interface StepStatus {
   id: string;
   state: StepState;
   message?: string;
+  /** 1-based attempt number while retrying. */
+  attempt?: number;
+  /** Total attempts allowed (1 + retries). */
+  attempts?: number;
 }
+
+export type LogLevel = 'info' | 'success' | 'warn' | 'error' | 'debug';
+export interface LogEntry {
+  ts: number;
+  level: LogLevel;
+  msg: string;
+}
+
+/** What to run. Omit both for the whole flow. Indexes are 0-based. */
+export interface RunOptions {
+  /** Start at this step (the steps before it are skipped). */
+  startAt?: number;
+  /** Run only this one step. */
+  only?: number;
+}
+
+/** Streamed while a run is in progress. */
+export interface RunProgress {
+  runId: string;
+  startedAt: number;
+  /** 0-based index of the step currently running (-1 before the first). */
+  stepIndex: number;
+  stepCount: number;
+  /** 1-based repeat pass, when inside the repeated range. */
+  pass?: number;
+  passes?: number;
+  downloadsStarted: number;
+  downloadsSaved: number;
+  paused: boolean;
+}
+
+export type RunStatus = 'ok' | 'warn' | 'error' | 'stopped';
+
+/** Per-step outcome in a finished run (repeated steps are aggregated). */
+export interface StepResult {
+  id: string;
+  index: number;
+  action: Action;
+  state: StepState;
+  /** How many times the step ran (a repeated step runs once per pass). */
+  runs: number;
+  failures: number;
+  totalMs: number;
+  message?: string;
+}
+
+export interface SavedFile {
+  filename: string;
+  path: string;
+  bytes?: number;
+}
+
+/** A finished run, kept in Run history. */
+export interface RunRecord {
+  id: string;
+  flowId: string;
+  flowName: string;
+  presetName?: string;
+  startedAt: number;
+  endedAt: number;
+  status: RunStatus;
+  error?: string;
+  vars: Record<string, string>;
+  steps: StepResult[];
+  downloads: SavedFile[];
+  screenshots: SavedFile[];
+  log: LogEntry[];
+  /** True when older log lines were dropped to keep the record small. */
+  logTruncated?: boolean;
+}
+
+/** A RunRecord without the heavy fields, for listing. */
+export type RunSummary = Omit<RunRecord, 'log' | 'steps' | 'vars'> & {
+  stepCount: number;
+  failures: number;
+};
 
 /** Result of a run. */
 export interface RunResult {
   ok: boolean;
   error?: string;
+  status?: RunStatus;
+  record?: RunRecord;
 }
 
-/** Human-readable labels for each action, used by the GUI dropdown. */
-export const ACTION_LABELS: Record<Action, string> = {
-  goto: 'Go to (link)',
-  back: 'Go back (previous page)',
-  search: 'Search Google for…',
-  fillField: 'Type into a field on this page',
-  click: 'Click element that says…',
-  closeAd: 'Close ad (best effort)',
-  closeTab: 'Close current tab',
-  closeOtherTabs: 'Close other tabs (clear pop-ups)',
-  pressKey: 'Press a key',
-  wait: 'Wait (ms)',
-  screenshot: 'Screenshot',
-  download: 'Download (click & save file)',
-  downloadWait: 'Download & wait',
-};
+export { ACTION_LABELS } from './actions';
