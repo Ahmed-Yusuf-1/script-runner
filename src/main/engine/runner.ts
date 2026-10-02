@@ -25,7 +25,7 @@ import type {
   RepeatConfig,
 } from '../../shared/types';
 import { ACTION_META } from '../../shared/actions';
-import { applyVariables, builtinValues, findMissing } from '../../shared/variables';
+import { applyVariables, builtinValues, findMissing, substitute } from '../../shared/variables';
 import { normalizeRepeat, counterAt } from '../../shared/repeat';
 import { launch, close } from './browser';
 import type { RunContext } from './browser';
@@ -288,9 +288,18 @@ export async function runFlow(
     await controller.waitIfPaused();
     if (signal.aborted) return { status: 'stopped' };
     pushProgress({ stepIndex: i, pass, passes: pass != null && repeat ? repeat.times : undefined });
-    // A new CSV gets a header row named after the variables in the template.
-    run.csvHeaders = steps[i].action === 'appendRow' ? csvHeaderNames(steps[i].value ?? '') : undefined;
-    const r = await runStep(run, steps[i], i, settings, { ...stepVars, ...run.runVars }, log, setStatus, signal);
+    const stepValues = { ...stepVars, ...run.runVars };
+    if (steps[i].action === 'appendRow') {
+      // Split the row template first, then fill each cell in: a value that
+      // contains a comma must not become two columns.
+      const template = steps[i].value ?? '';
+      run.csvHeaders = csvHeaderNames(template);
+      run.csvCells = template.split(',').map((cell) => substitute(cell, stepValues)?.trim() ?? '');
+    } else {
+      run.csvHeaders = undefined;
+      run.csvCells = undefined;
+    }
+    const r = await runStep(run, steps[i], i, settings, stepValues, log, setStatus, signal);
     const res = results.get(steps[i].id)!;
     if (r.outcome !== 'skipped') {
       res.runs += 1;

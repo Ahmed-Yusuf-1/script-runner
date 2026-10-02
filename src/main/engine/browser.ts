@@ -36,6 +36,8 @@ export interface RunContext {
   savedRows: string[];
   /** Column names to write when a "Save a row" step creates a new CSV. */
   csvHeaders?: string[];
+  /** The cells of the row being saved, split before variables were filled in. */
+  csvCells?: string[];
   /** Called after each navigation: clears cookie banners when that's turned on. */
   afterNavigation?: () => Promise<void>;
   /** Hand control to the person until they press Resume (the "Pause for me" step). */

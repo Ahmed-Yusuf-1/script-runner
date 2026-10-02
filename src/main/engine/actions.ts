@@ -147,19 +147,20 @@ async function clickWithRecovery(ctx: RunContext, el: Locator, emit: Emit, what:
       await click({ timeout: 5000 });
       return;
     } catch {
-      /* fall through to a forced click */
+      /* still blocked: go around the thing that's in the way */
     }
+    // Ask the page to click the element itself. A forced click would still be
+    // delivered at that screen position, so an invisible layer on top would
+    // swallow it — common on ad-funded download sites. This reaches the element.
     try {
-      await click({ timeout: 5000, force: true });
-      emit.log(`${what}: clicked through an overlay.`, 'debug');
+      await el.evaluate((node) => (node as HTMLElement).click());
+      emit.log(`${what}: clicked through an overlay using the page's own click.`, 'debug');
       return;
     } catch {
-      /* fall through to a DOM click */
+      /* some controls only react to a real pointer: fall through */
     }
-    // Last resort: ask the page to click the element itself. This works when an
-    // invisible layer sits on top, which is common on ad-funded download sites.
-    await el.evaluate((node) => (node as HTMLElement).click());
-    emit.log(`${what}: used the page's own click as a last resort.`, 'debug');
+    await click({ timeout: 5000, force: true });
+    emit.log(`${what}: forced the click.`, 'debug');
   }
 }
 
@@ -453,7 +454,9 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
 
     case 'appendRow': {
       // Collect results as the flow runs: one CSV row per pass.
-      const cells = (step.value ?? '').split(',').map((c) => c.trim());
+      // The runner splits the template before substituting, so a value with a
+      // comma in it ("£ 12,50") stays in one cell.
+      const cells = ctx.csvCells ?? (step.value ?? '').split(',').map((c) => c.trim());
       if (!cells.some(Boolean)) throw new Error('Save a row: nothing to write.');
       const name = sanitizeFilename((step.fileName ?? '').trim() || 'results.csv', 'results.csv');
       const file = join(ctx.downloadDir, /\.(csv|txt|tsv)$/i.test(name) ? name : name + '.csv');

@@ -62,7 +62,7 @@ const PAGES: Record<string, string> = {
   // Links and prices to collect.
   '/list': `<!doctype html><body>
     <a id="first" href="/downloads/one.txt" data-sku="A-1">First file</a>
-    <span id="price">  £ 12.50 </span>
+    <span id="price">  £ 12,50 </span>
   </body>`,
 };
 
@@ -128,18 +128,6 @@ async function main() {
     );
     t.check('saved a link and an attribute', ctx.runVars.link.endsWith('/downloads/one.txt') && ctx.runVars.sku === 'A-1', ctx.runVars);
 
-    // Collect rows into a CSV, with a header row from the template.
-    ctx.runVars.price = '£ 12,50';
-    ctx.csvHeaders = ['sku', 'price'];
-    await runAction(ctx, step({ action: 'appendRow', value: 'A-1, £ 12,50', fileName: 'out.csv' }), emit);
-    await runAction(ctx, step({ action: 'appendRow', value: 'B-2, £ 3.00', fileName: 'out.csv' }), emit);
-    const csv = readFileSync(join(dir, 'out.csv'), 'utf8').trim().split('\n');
-    t.check(
-      'wrote a CSV with a header and quoted commas',
-      csv.length === 3 && csv[0] === 'sku,price' && csv[1] === 'A-1,"£ 12,50"',
-      csv
-    );
-
     // A switched-off button fails honestly instead of being forced.
     await ctx.page.goto(srv.base + '/disabled');
     ctx.stepTimeout = 2500;
@@ -163,6 +151,29 @@ async function main() {
 
   // ---- Settings-level behaviour (through the runner) ----
   const flow = (steps: Step[]): Flow => ({ id: 'f', name: 'real world', steps, createdAt: 0, updatedAt: 0 });
+
+  // Collect rows into a CSV through the runner: the row template is split
+  // before variables are filled in, so a price containing a comma stays whole.
+  {
+    const res = await runFlow(
+      flow([
+        { id: 'g', action: 'goto', value: srv.base + '/list' },
+        { id: 'e', action: 'extractText', saveAs: 'price', target: { by: 'selector', selector: '#price' } },
+        { id: 'k', action: 'extractText', saveAs: 'sku', target: { by: 'selector', selector: '#first' }, options: { extract: 'attribute', attribute: 'data-sku' } },
+        { id: 'r', action: 'appendRow', value: '{{sku}}, {{price}}', fileName: 'rows.csv' },
+      ]),
+      testSettings(dir),
+      {},
+      quietEmit,
+      new AbortController().signal
+    );
+    const csv = readFileSync(join(dir, 'rows.csv'), 'utf8').trim().split('\n');
+    t.check(
+      'wrote a CSV with a header, and a comma inside a value stayed in one cell',
+      res.ok && csv.length === 2 && csv[0] === 'sku,price' && csv[1] === 'A-1,"£ 12,50"',
+      csv
+    );
+  }
 
   // A cookie banner is cleared after navigation, so the next step can click.
   {
