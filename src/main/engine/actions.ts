@@ -152,12 +152,15 @@ async function clickWithRecovery(ctx: RunContext, el: Locator, emit: Emit, what:
     // Ask the page to click the element itself. A forced click would still be
     // delivered at that screen position, so an invisible layer on top would
     // swallow it — common on ad-funded download sites. This reaches the element.
-    try {
-      await el.evaluate((node) => (node as HTMLElement).click());
-      emit.log(`${what}: clicked through an overlay using the page's own click.`, 'debug');
-      return;
-    } catch {
-      /* some controls only react to a real pointer: fall through */
+    // It can only do a plain click, so double and right clicks skip it.
+    if (kind === 'single') {
+      try {
+        await el.evaluate((node) => (node as HTMLElement).click());
+        emit.log(`${what}: clicked through an overlay using the page's own click.`, 'debug');
+        return;
+      } catch {
+        /* some controls only react to a real pointer: fall through */
+      }
     }
     await click({ timeout: 5000, force: true });
     emit.log(`${what}: forced the click.`, 'debug');
