@@ -68,6 +68,9 @@ export function App() {
 
   const ed = useUndoable<Flow>(newFlow);
   const flow = ed.value;
+  // These are stable across renders, so step cards can skip re-rendering when
+  // an unrelated field changes (it matters once a flow has many steps).
+  const { set: editFlow, reset: resetFlow, undo: undoEdit, redo: redoEdit } = ed;
   const [savedSnap, setSavedSnap] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -114,13 +117,13 @@ export function App() {
   const openFlowNow = useCallback(
     (f: Flow | null) => {
       const next = f ? structuredClone(f) : newFlow();
-      ed.reset(next);
+      resetFlow(next);
       setSavedSnap(f ? norm(f) : null);
       setSelectedId(null);
       setExpanded(new Set());
       if (f) remember(f.id);
     },
-    [ed]
+    [resetFlow]
   );
 
   const loadProfile = useCallback(
@@ -155,7 +158,7 @@ export function App() {
             cancelLabel: 'Discard',
           });
           if (restore) {
-            ed.reset(draft.flow);
+            resetFlow(draft.flow);
             setSavedSnap(draft.savedSnap);
             setView('editor');
             toast.info('Restored your unsaved changes. Save them to keep them.');
@@ -205,7 +208,7 @@ export function App() {
     const toSave = { ...flow, name: flow.name.trim() || 'Untitled flow' };
     try {
       const saved = await window.api.saveFlow(toSave);
-      if (toSave.name !== flow.name) ed.set((f) => ({ ...f, name: toSave.name }));
+      if (toSave.name !== flow.name) editFlow((f) => ({ ...f, name: toSave.name }));
       setSavedSnap(norm(saved));
       setFlows((prev) => [saved, ...prev.filter((f) => f.id !== saved.id)].sort(byNewest));
       remember(saved.id);
@@ -215,7 +218,7 @@ export function App() {
       toast.error('Couldn’t save: ' + errMsg(err));
       return false;
     }
-  }, [flow, ed, toast]);
+  }, [flow, editFlow, toast]);
 
   /** Ask what to do with unsaved changes. Resolves true if it's OK to move on. */
   const confirmLeave = useCallback(async (): Promise<boolean> => {
@@ -254,12 +257,12 @@ export function App() {
   const loadExample = useCallback(async () => {
     if (!(await confirmLeave())) return;
     const f = demoFlow();
-    ed.reset(f);
+    resetFlow(f);
     setSavedSnap(null);
     setSelectedId(null);
     setExpanded(new Set());
     setView('editor');
-  }, [confirmLeave, ed]);
+  }, [confirmLeave, resetFlow]);
 
   const deleteFlow = useCallback(
     async (f: Flow) => {
@@ -411,17 +414,17 @@ export function App() {
   // ---- Step editing ----
   const patchStep = useCallback(
     (id: string, fn: StepPatch, coalesce?: string) =>
-      ed.set((f) => ({ ...f, steps: f.steps.map((s) => (s.id === id ? fn(s) : s)) }), { coalesce }),
-    [ed]
+      editFlow((f) => ({ ...f, steps: f.steps.map((s) => (s.id === id ? fn(s) : s)) }), { coalesce }),
+    [editFlow]
   );
 
   const addStepAt = useCallback(
     (index: number, step: Step) => {
-      ed.set((f) => insertStep(f, index, step));
+      editFlow((f) => insertStep(f, index, step));
       setSelectedId(step.id);
       setScrollTo(step.id);
     },
-    [ed]
+    [editFlow]
   );
 
   const addStep = useCallback(() => {
@@ -448,27 +451,27 @@ export function App() {
     (id: string) => {
       const i = flow.steps.findIndex((s) => s.id === id);
       if (i < 0) return;
-      ed.set((f) => removeStepAt(f, i));
+      editFlow((f) => removeStepAt(f, i));
       if (selectedId === id) setSelectedId(flow.steps[i + 1]?.id ?? flow.steps[i - 1]?.id ?? null);
-      toast.info(`Deleted step ${i + 1}`, { action: { label: 'Undo', onClick: ed.undo } });
+      toast.info(`Deleted step ${i + 1}`, { action: { label: 'Undo', onClick: undoEdit } });
     },
-    [ed, flow.steps, selectedId, toast]
+    [editFlow, undoEdit, flow.steps, selectedId, toast]
   );
 
   const moveBy = useCallback(
     (id: string, dir: -1 | 1) => {
       const i = flow.steps.findIndex((s) => s.id === id);
-      ed.set((f) => moveStep(f, i, i + dir));
+      editFlow((f) => moveStep(f, i, i + dir));
     },
-    [ed, flow.steps]
+    [editFlow, flow.steps]
   );
 
   const reorder = useCallback(
     (id: string, to: number) => {
       const i = flow.steps.findIndex((s) => s.id === id);
-      ed.set((f) => moveStep(f, i, to));
+      editFlow((f) => moveStep(f, i, to));
     },
-    [ed, flow.steps]
+    [editFlow, flow.steps]
   );
 
   const copySelectedStep = useCallback(() => {
@@ -583,9 +586,9 @@ export function App() {
     'mod+enter': () => view === 'editor' && void startRun(),
     'mod+shift+enter': () => view === 'editor' && selectedIndex >= 0 && runFrom(selectedIndex),
     'mod+.': () => run.running && run.stop(),
-    'mod+z': () => editing && ed.undo(),
-    'mod+shift+z': () => editing && ed.redo(),
-    'mod+y': () => editing && ed.redo(),
+    'mod+z': () => editing && undoEdit(),
+    'mod+shift+z': () => editing && redoEdit(),
+    'mod+y': () => editing && redoEdit(),
     'mod+d': () => editing && selectedId && duplicateStep(selectedId),
     'mod+c': () => editing && selectedId && copySelectedStep(),
     'mod+v': () => editing && void pasteStep(),
@@ -645,12 +648,12 @@ export function App() {
             <Topbar
               presetName={presetName}
               name={flow.name}
-              onName={(name) => ed.set((f) => ({ ...f, name }), { coalesce: 'name' })}
+              onName={(name) => editFlow((f) => ({ ...f, name }), { coalesce: 'name' })}
               dirty={dirty}
               canUndo={ed.canUndo && !runningHere}
               canRedo={ed.canRedo && !runningHere}
-              onUndo={ed.undo}
-              onRedo={ed.redo}
+              onUndo={undoEdit}
+              onRedo={redoEdit}
               onSave={() => void save()}
               running={runningHere}
               busyElsewhere={busyElsewhere}
@@ -707,14 +710,14 @@ export function App() {
                     repeat={flow.repeat}
                     stepCount={flow.steps.length}
                     locked={runningHere}
-                    onChange={(repeat, coalesce) => ed.set((f) => ({ ...f, repeat }), { coalesce })}
+                    onChange={(repeat, coalesce) => editFlow((f) => ({ ...f, repeat }), { coalesce })}
                   />
                   <InputsPanel
                     variables={flow.variables ?? {}}
                     steps={flow.steps}
                     counterName={flow.repeat?.enabled ? flow.repeat.counterName : undefined}
                     locked={runningHere}
-                    onChange={(variables, coalesce) => ed.set((f) => ({ ...f, variables }), { coalesce })}
+                    onChange={(variables, coalesce) => editFlow((f) => ({ ...f, variables }), { coalesce })}
                   />
                 </div>
               </div>

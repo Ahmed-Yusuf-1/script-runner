@@ -29,7 +29,7 @@
     "smoke:whitelist": "tsx src/main/engine/smoke-whitelist.ts",
     "smoke:dlstart": "tsx src/main/engine/smoke-dlstart.ts",
     "postinstall": "playwright install chromium",
-    "install-browsers": "node -e \"process.env.PLAYWRIGHT_BROWSERS_PATH='playwright-browsers'; require('child_process').execSync('npx playwright install chromium', {stdio: 'inherit'})\"",
+    "install-browsers": "node scripts/install-browsers.mjs",
     "dist": "npm run build && npm run install-browsers && electron-builder",
     "smoke:actions2": "tsx src/main/engine/smoke-actions2.ts",
     "smoke:control": "tsx src/main/engine/smoke-control.ts",
