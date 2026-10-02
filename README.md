@@ -10,11 +10,16 @@ Script Runner is a desktop app for repeatable browser work. You describe each st
 
 ## Download
 
-**[Releases](https://github.com/Ahmed-Yusuf-1/script-runner/releases)**
+**[Download v0.2.0](https://github.com/Ahmed-Yusuf-1/script-runner/releases/latest)**
 
-- The installer is about 290 MB because it bundles its own Chromium, so you don't need to install a browser or Node.js.
+| Platform | File |
+|---|---|
+| Windows | `Script-Runner-0.2.0-win-x64.exe` (293 MB) |
+| Linux | `Script-Runner-0.2.0-linux-x86_64.AppImage` (354 MB) or `…-linux-amd64.deb` (301 MB) |
+| macOS | Build it yourself on a Mac (see [Build the installer](#build-the-installer)) |
+
+- They're large because each one bundles its own Chromium, so you don't need to install a browser or Node.js.
 - The builds aren't code-signed yet. On Windows, SmartScreen may show a warning: choose **More info → Run anyway**.
-- Linux (AppImage, deb) and macOS (dmg) targets are configured. You can build them yourself (see [Build the installer](#build-the-installer)).
 
 ## What it does
 
