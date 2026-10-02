@@ -161,7 +161,7 @@ src/
 │   ├── storage/             flows, presets, settings, history, atomic file helpers
 │   └── engine/              Playwright automation engine (no Electron imports)
 │       ├── runner.ts        runs a flow: repeat, retries, pause/stop, run record
-│       ├── actions.ts       the 20 step actions
+│       ├── actions.ts       the 23 step actions
 │       ├── target.ts        text / label / search box / selector → locator
 │       ├── pages.ts         new tabs, pop-ups, download capture
 │       ├── adblock.ts       Ghostery filter lists + fallback host list
