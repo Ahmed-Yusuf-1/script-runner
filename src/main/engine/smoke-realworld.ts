@@ -17,7 +17,7 @@ import type { Flow, Step } from '../../shared/types';
 const PAGES: Record<string, string> = {
   // A button that only exists inside an iframe.
   '/frames': `<!doctype html><body><h1>Outer page</h1><iframe src="/inner" width="400" height="200"></iframe></body>`,
-  '/inner': `<!doctype html><body><button id="go" onclick="document.title='frame-clicked'">Download Now</button></body>`,
+  '/inner': `<!doctype html><body><button id="go" onclick="this.textContent='Clicked in the frame'">Download Now</button></body>`,
 
   // A cookie banner covering the page, like most of the web.
   '/consent': `<!doctype html><body>
@@ -89,7 +89,9 @@ async function main() {
     // Content inside an iframe is found without the user knowing it's a frame.
     await ctx.page.goto(srv.base + '/frames');
     await runAction(ctx, step({ action: 'click', target: { by: 'text', text: 'Download Now' } }), emit);
-    t.check('clicked a button inside an iframe', (await ctx.page.title()) === 'frame-clicked');
+    // The button lives in the frame, so the result is only visible in the frame.
+    const framed = await ctx.page.frameLocator('iframe').locator('#go').innerText();
+    t.check('clicked a button inside an iframe', framed === 'Clicked in the frame', framed);
 
     // An invisible overlay must not stop the click.
     await ctx.page.goto(srv.base + '/overlay');

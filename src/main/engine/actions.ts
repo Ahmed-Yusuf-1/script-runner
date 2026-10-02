@@ -115,13 +115,20 @@ async function clickWithRecovery(ctx: RunContext, el: Locator, emit: Emit, what:
   const click = (opts: Parameters<Locator['click']>[0] = {}) =>
     kind === 'double' ? el.dblclick(opts) : el.click({ ...opts, button: kind === 'right' ? 'right' : 'left' });
 
+  // Don't spend the whole step's budget on the first attempt: when something is
+  // covering the element, Playwright retries internally until it times out, and
+  // the recovery below is what actually gets the click through.
+  const firstTry = Math.min(ctx.stepTimeout, 8000);
   try {
-    await click({ timeout: Math.min(ctx.stepTimeout, 20_000) });
+    await click({ timeout: firstTry });
     return;
   } catch (first) {
     if (ctx.signal?.aborted) throw first;
+    // Playwright reports "intercepts pointer events" in the call log, which the
+    // tidied message drops, so test the raw text as well.
+    const raw = first instanceof Error ? first.message : String(first);
     const reason = errorMessage(first);
-    const blocked = /intercept|not visible|outside of the viewport|stable|enabled|covered/i.test(reason);
+    const blocked = /intercept|not visible|outside of the viewport|stable|enabled|covered|timeout/i.test(raw);
     if (!blocked) throw first;
     emit.log(`${what}: the click didn't land (${reason.split('.')[0]}). Trying again.`, 'warn');
 
