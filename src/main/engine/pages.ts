@@ -8,14 +8,12 @@
 //
 // Kept free of Electron imports so the engine stays testable headless.
 
-import { join } from 'path';
+import { basename, join } from 'path';
+import { promises as fs } from 'fs';
 import type { BrowserContext, Page, Download } from 'playwright';
+import type { LogLevel, SavedFile } from '../../shared/types';
 import { isAdHost } from './adblock';
-
-export interface DownloadRecord {
-  path: string;
-  filename: string;
-}
+import { uniquePath, release, formatBytes, fileExists } from './util';
 
 export interface PageManagerOptions {
   downloadDir: string;
@@ -23,44 +21,75 @@ export interface PageManagerOptions {
   blockPopupTabs: boolean;
   /** Sites whose pop-ups are always allowed (never closed). */
   whitelist?: string[];
-  log?: (msg: string) => void;
+  /** Don't download a file again when that name is already in the folder. */
+  skipExisting?: boolean;
+  log?: (msg: string, level?: LogLevel) => void;
   /** Called when the engine should switch its active tab to a new page. */
   onActiveTab?: (page: Page) => void;
   /** Called the moment a download begins. */
   onDownloadStart?: () => void;
+  /** Called when a download has been fully written to disk. */
+  onDownloadSaved?: (file: SavedFile) => void;
   /** Called when a download finishes saving (or fails). */
   onDownloadDone?: () => void;
+  /** Called when a download was skipped because the file was already there. */
+  onDownloadSkipped?: () => void;
 }
 
-export function setupPageManager(
-  context: BrowserContext,
-  opts: PageManagerOptions
-): DownloadRecord[] {
+export function setupPageManager(context: BrowserContext, opts: PageManagerOptions): void {
   const log = opts.log ?? (() => {});
-  const downloads: DownloadRecord[] = [];
   const pagesThatDownloaded = new WeakSet<Page>();
 
   // Save every download from every page, wherever it happens. The 'download'
   // event fires when the download STARTS; saving large files then streams in the
   // background — so we report "started" right away and "done" once saved.
+  // Files never overwrite each other: a second "report.pdf" becomes "report (1).pdf".
   const capture = (page: Page) => {
     page.on('download', (d: Download) => {
       pagesThatDownloaded.add(page);
-      opts.onDownloadStart?.();
-      log(`Download started: ${d.suggestedFilename()}`);
-      void (async () => {
-        try {
-          const dest = join(opts.downloadDir, d.suggestedFilename());
-          await d.saveAs(dest); // resolves only when the whole file is written
-          downloads.push({ path: dest, filename: d.suggestedFilename() });
-          log(`Saved download: ${d.suggestedFilename()}`);
-        } catch {
-          /* ignore a failed/canceled download */
-        } finally {
-          opts.onDownloadDone?.();
-        }
-      })();
+      const suggested = d.suggestedFilename();
+
+      // Already got this one? Don't fetch it twice. Repeat loops over a list
+      // then pick up where they left off instead of filling the folder with
+      // "file (1)", "file (2)"…
+      if (opts.skipExisting) {
+        void (async () => {
+          if (await fileExists(join(opts.downloadDir, suggested))) {
+            await d.cancel().catch(() => {});
+            log(`Skipped ${suggested}: it's already in the download folder.`, 'info');
+            opts.onDownloadSkipped?.();
+            return;
+          }
+          startSaving(d, suggested);
+        })();
+        return;
+      }
+      startSaving(d, suggested);
     });
+  };
+
+  /** Stream a download to disk under a free file name. */
+  const startSaving = (d: Download, suggested: string) => {
+    opts.onDownloadStart?.();
+    log(`Download started: ${suggested}`);
+    void (async () => {
+      let dest = '';
+      try {
+        dest = await uniquePath(opts.downloadDir, suggested);
+        await d.saveAs(dest); // resolves only when the whole file is written
+        const bytes = await fs.stat(dest).then((st) => st.size).catch(() => undefined);
+        const filename = basename(dest);
+        opts.onDownloadSaved?.({ path: dest, filename, bytes });
+        const renamed = filename !== suggested ? ` as ${filename}` : '';
+        log(`Saved ${suggested}${renamed}${bytes != null ? ` (${formatBytes(bytes)})` : ''}`, 'success');
+      } catch (err) {
+        const reason = (await d.failure().catch(() => null)) ?? (err instanceof Error ? err.message : String(err));
+        log(`Download of ${suggested} failed: ${String(reason).split('\n')[0]}`, 'warn');
+      } finally {
+        if (dest) release(dest);
+        opts.onDownloadDone?.();
+      }
+    })();
   };
 
   const whitelist = opts.whitelist ?? [];
@@ -83,7 +112,7 @@ export function setupPageManager(
     // pop-under ad tabs these download sites spawn alongside the real page.
     if ((opts.blockPopupTabs || opts.blockPopupWindows) && isAdHost(url)) {
       await page.close().catch(() => {});
-      log(`Blocked an ad tab: ${url}`);
+      log(`Blocked an ad tab: ${url}`, 'warn');
       return;
     }
 
@@ -97,7 +126,7 @@ export function setupPageManager(
     if (isPopup) {
       if (opts.blockPopupWindows && (isAdHost(url) || url === 'about:blank' || url === '')) {
         await page.close().catch(() => {});
-        log(`Blocked a pop-up window: ${url}`);
+        log(`Blocked a pop-up window: ${url || 'about:blank'}`, 'warn');
         return;
       }
     } else {
@@ -118,7 +147,7 @@ export function setupPageManager(
       // 3. If blockPopupTabs is enabled, close any other new tab (cross-site and not whitelisted)
       if (opts.blockPopupTabs) {
         await page.close().catch(() => {});
-        log(`Blocked a pop-up tab: ${url}`);
+        log(`Blocked a pop-up tab: ${url}`, 'warn');
         return;
       }
     }
@@ -135,8 +164,6 @@ export function setupPageManager(
     capture(page);
     void handleNewTab(page);
   });
-
-  return downloads;
 }
 
 function safeUrl(page: Page): string {
