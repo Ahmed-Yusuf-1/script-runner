@@ -239,7 +239,7 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       const box = page.locator('textarea[name="q"], input[name="q"]').first();
       await box.fill(query);
       await box.press('Enter');
-      await settle(page);
+      await settle(ctx.page);
       return;
     }
 
@@ -261,7 +261,7 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (step.options?.pressEnter ?? true) {
         emit.log('Pressing Enter', 'debug');
         await field.press('Enter');
-        await settle(page);
+        await settle(ctx.page);
       }
       return;
     }
@@ -273,7 +273,7 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       const kind = step.options?.clickType ?? 'single';
       emit.log(`${kind === 'double' ? 'Double-clicking' : kind === 'right' ? 'Right-clicking' : 'Clicking'} ${describeTarget(target)}`);
       await clickWithRecovery(ctx, el, emit, 'Click', kind);
-      await settle(page);
+      await settle(ctx.page);
       return;
     }
 
@@ -306,7 +306,7 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
           throw new Error(`Choose from dropdown: no option “${choice}”.${list ? ` Options: ${list}` : ''}`);
         }
       }
-      await settle(page);
+      await settle(ctx.page);
       return;
     }
 

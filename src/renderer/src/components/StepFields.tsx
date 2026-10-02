@@ -90,6 +90,11 @@ export function StepFields({ step, onPatch, disabled }: Props) {
               ['placeholder', 'Dropdown labelled'],
               ['selector', 'CSS selector'],
             ]
+          : meta.target === 'file'
+            ? [
+                ['placeholder', 'Upload field labelled'],
+                ['selector', 'CSS selector'],
+              ]
           : [
               ['text', 'Text'],
               ['selector', 'CSS selector'],
@@ -132,7 +137,9 @@ export function StepFields({ step, onPatch, disabled }: Props) {
             by === 'placeholder'
               ? meta.target === 'select'
                 ? 'the dropdown’s label'
-                : 'placeholder or label, e.g. Email'
+                : meta.target === 'file'
+                  ? 'the upload field’s label'
+                  : 'placeholder or label, e.g. Email'
               : step.action === 'waitFor'
                 ? 'text that should appear'
                 : 'the text on it, e.g. Download'

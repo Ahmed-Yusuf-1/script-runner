@@ -1,0 +1,75 @@
+name: Release
+
+# Builds the installers and attaches them to a GitHub release.
+#   - push a tag:  git tag v0.2.0 && git push origin v0.2.0
+#   - or run it by hand from the Actions tab (Run workflow)
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish as (e.g. v0.2.0). Leave empty for a draft named after the version.'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: Windows installer
+            build: npm run dist:win
+            artifacts: 'dist/*.exe'
+          - os: ubuntu-latest
+            name: Linux AppImage and deb
+            build: npm run dist:linux
+            artifacts: |
+              dist/*.AppImage
+              dist/*.deb
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # Bundles its own Chromium into the installer, so users need nothing else.
+      - run: ${{ matrix.build }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.os }}-installers
+          path: ${{ matrix.artifacts }}
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Collect the installers
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.exe' -o -name '*.AppImage' -o -name '*.deb' \) -exec cp {} release/ \;
+          ls -lh release
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || inputs.tag }}
+          draft: ${{ github.ref_type != 'tag' }}
+          generate_release_notes: true
+          files: release/*

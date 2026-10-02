@@ -28,7 +28,12 @@ function resultText(r: RunSummary): string {
   if (r.status === 'stopped') return 'Stopped by you';
   const files = r.downloads.length;
   const shots = r.screenshots.length;
-  const parts = [files ? plural(files, 'file') + ' saved' : '', shots ? plural(shots, 'screenshot') : ''].filter(Boolean);
+  const rows = r.dataFiles?.length ?? 0;
+  const parts = [
+    files ? plural(files, 'file') + ' saved' : '',
+    rows ? plural(rows, 'data file') : '',
+    shots ? plural(shots, 'screenshot') : '',
+  ].filter(Boolean);
   const base = parts.join(', ') || 'Completed';
   return r.status === 'warn' ? `${base}; ${plural(r.failures, 'step')} failed and continued` : base;
 }
@@ -198,7 +203,7 @@ function RunDetail({
   const s = STATUS[record.status];
   const failures = record.steps.reduce((n, x) => n + x.failures, 0);
   const stepRuns = record.steps.reduce((n, x) => n + x.runs, 0);
-  const files = [...record.downloads, ...record.screenshots];
+  const files = [...record.downloads, ...(record.dataFiles ?? []), ...record.screenshots];
   const vars = Object.entries(record.vars ?? {});
 
   return (
@@ -263,7 +268,7 @@ function RunDetail({
           <div className="field-label">Files saved</div>
           {files.slice(0, 50).map((f) => (
             <div key={f.path} className="file-row compact">
-              <Icon name={record.screenshots.includes(f) ? 'image' : 'file'} size={14} />
+              <Icon name={record.screenshots.includes(f) ? 'image' : (record.dataFiles ?? []).includes(f) ? 'table' : 'file'} size={14} />
               <button className="link-btn file-name" title={f.path} onClick={() => window.api.openFile(f.path).catch(onError)}>
                 {f.filename}
               </button>

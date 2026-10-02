@@ -82,8 +82,9 @@ export function Console({ logs, running, paused, progress, lastResult, onClear, 
   }, [shown, stick, tab, collapsed]);
 
   const record = lastResult?.record;
-  const files: (SavedFile & { kind: 'download' | 'screenshot' })[] = [
+  const files: (SavedFile & { kind: 'download' | 'screenshot' | 'data' })[] = [
     ...(record?.downloads ?? []).map((f) => ({ ...f, kind: 'download' as const })),
+    ...(record?.dataFiles ?? []).map((f) => ({ ...f, kind: 'data' as const })),
     ...(record?.screenshots ?? []).map((f) => ({ ...f, kind: 'screenshot' as const })),
   ];
 
@@ -282,7 +283,7 @@ export function Console({ logs, running, paused, progress, lastResult, onClear, 
           ) : (
             files.map((f) => (
               <div key={f.path} className="file-row">
-                <Icon name={f.kind === 'screenshot' ? 'image' : 'file'} />
+                <Icon name={f.kind === 'screenshot' ? 'image' : f.kind === 'data' ? 'table' : 'file'} />
                 <span className="file-name" title={f.path}>
                   {f.filename}
                 </span>
