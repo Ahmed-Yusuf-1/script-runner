@@ -233,3 +233,61 @@ test('describeTarget reads naturally', () => {
   assert.equal(describeTarget({ by: 'searchbox' }), 'the main search box');
   assert.equal(describeTarget({ by: 'text', text: 'Go' }), '“Go”');
 });
+
+// ---- the v0.2 settings ----
+
+test('normalizeSettings bounds the new numbers and keeps sane strings', () => {
+  const d = defaultSettings('/dl');
+  const s = normalizeSettings(
+    {
+      downloadSubfolder: 'sideways',
+      downloadWaitMs: -5,
+      maxRunMs: 99 * 3_600_000,
+      viewportWidth: 1280,
+      viewportHeight: 99_999,
+      userAgent: '  Mozilla/5.0  ',
+      proxy: 'x'.repeat(500),
+      dismissConsent: false,
+      skipExistingDownloads: true,
+    },
+    d
+  );
+  assert.equal(s.downloadSubfolder, 'none'); // unknown value falls back
+  assert.equal(s.downloadWaitMs, d.downloadWaitMs); // negative rejected
+  assert.equal(s.maxRunMs, d.maxRunMs); // over a day rejected
+  assert.equal(s.viewportWidth, 1280);
+  assert.equal(s.viewportHeight, d.viewportHeight); // out of range rejected
+  assert.equal(s.userAgent, 'Mozilla/5.0');
+  assert.equal(s.proxy.length, 200); // capped
+  assert.equal(s.dismissConsent, false);
+  assert.equal(s.skipExistingDownloads, true);
+});
+
+test('settings saved by v0.2.0-without-new-fields still load', () => {
+  const d = defaultSettings('/dl');
+  const old = { headless: true, downloadDir: '/old', timeoutMs: 20000, adblock: false };
+  const s = normalizeSettings(old, d);
+  assert.equal(s.headless, true);
+  assert.equal(s.downloadDir, '/old');
+  assert.equal(s.dismissConsent, d.dismissConsent);
+  assert.equal(s.keepAwake, d.keepAwake);
+  assert.equal(s.downloadSubfolder, 'none');
+});
+
+test('the new actions get usable defaults and keep their own fields', () => {
+  const base: Step = { id: '1', action: 'click', target: { by: 'text', text: 'Save' } };
+  const row = changeAction(base, 'appendRow');
+  assert.equal(row.fileName, 'results.csv');
+  assert.equal(row.target, undefined);
+  const upload = changeAction(row, 'uploadFile');
+  assert.equal(upload.target?.by, 'placeholder');
+  assert.equal(upload.fileName, undefined); // a CSV name is not a file to attach
+  const pause = changeAction(upload, 'waitForMe');
+  assert.equal(pause.target, undefined);
+  assert.equal(pause.fileName, undefined);
+  assert.equal(changeAction(base, 'click').options?.clickType, 'single');
+});
+
+test('“Pause for me” needs nothing filled in', () => {
+  assert.deepEqual(validateStep({ id: '1', action: 'waitForMe' }), []);
+});

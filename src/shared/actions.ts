@@ -254,8 +254,12 @@ export function changeAction(step: Step, action: Action): Step {
   if (!meta.value || meta.value.kind !== prevMeta.value?.kind) next.value = defaultValue(action);
   if (action !== 'extractText') delete next.saveAs;
   else next.saveAs = step.saveAs ?? 'text';
-  if (action !== 'appendRow' && action !== 'uploadFile') delete next.fileName;
-  else if (action === 'appendRow') next.fileName = step.fileName ?? 'results.csv';
+  // Both actions have a "file" field, but they mean different things (a CSV to
+  // write vs. a file to attach), so a name only survives within the same action.
+  const sameFileField = step.action === action;
+  if (action === 'appendRow') next.fileName = (sameFileField ? step.fileName : undefined) ?? 'results.csv';
+  else if (action === 'uploadFile') next.fileName = sameFileField ? step.fileName : undefined;
+  else delete next.fileName;
   const options = { ...(step.options ?? {}) };
   if (action === 'fillField') options.pressEnter = options.pressEnter ?? true;
   if (action === 'downloadWait') options.waitMs = options.waitMs ?? 30000;
