@@ -9,12 +9,23 @@ import { execFileSync } from 'child_process';
 import { existsSync, readdirSync, statSync } from 'fs';
 import { join, resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dest = join(root, 'playwright-browsers'); // absolute: a relative value is resolved inconsistently
 
+// Run Playwright's own CLI with this Node, rather than through npx: Node on
+// Windows refuses to spawn npx.cmd directly, and this avoids the shell entirely.
+// The package doesn't export cli.js, so locate it next to its package.json.
+const require = createRequire(import.meta.url);
+const cli = join(dirname(require.resolve('playwright/package.json')), 'cli.js');
+if (!existsSync(cli)) {
+  console.error(`Playwright's CLI is missing (${cli}). Run npm install first.`);
+  process.exit(1);
+}
+
 console.log(`Downloading Chromium into ${dest}`);
-execFileSync(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['playwright', 'install', 'chromium'], {
+execFileSync(process.execPath, [cli, 'install', 'chromium'], {
   stdio: 'inherit',
   cwd: root,
   env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: dest },
