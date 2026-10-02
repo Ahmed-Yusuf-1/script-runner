@@ -13,7 +13,7 @@
     "test": "tsx --test tests/*.test.ts",
     "check": "npm run typecheck && npm test && npm run build",
     "smoke": "tsx src/main/engine/smoke.ts",
-    "smoke:offline": "npm run smoke:repeat && npm run smoke:download && npm run smoke:newtab && npm run smoke:match && npm run smoke:back && npm run smoke:nth && npm run smoke:autoinc && npm run smoke:waitafter && npm run smoke:tabfollow && npm run smoke:closetab && npm run smoke:whitelist && npm run smoke:dlstart && npm run smoke:actions2 && npm run smoke:control && npm run smoke:dlname",
+    "smoke:offline": "npm run smoke:repeat && npm run smoke:download && npm run smoke:newtab && npm run smoke:match && npm run smoke:back && npm run smoke:nth && npm run smoke:autoinc && npm run smoke:waitafter && npm run smoke:tabfollow && npm run smoke:closetab && npm run smoke:whitelist && npm run smoke:dlstart && npm run smoke:actions2 && npm run smoke:control && npm run smoke:dlname && npm run smoke:realworld",
     "smoke:repeat": "tsx src/main/engine/smoke-repeat.ts",
     "smoke:download": "tsx src/main/engine/smoke-download.ts",
     "smoke:adblock": "tsx src/main/engine/smoke-adblock.ts",
@@ -36,7 +36,8 @@
     "smoke:dlname": "tsx src/main/engine/smoke-dlname.ts",
     "dist:win": "npm run build && npm run install-browsers && electron-builder --win",
     "dist:mac": "npm run build && npm run install-browsers && electron-builder --mac",
-    "dist:linux": "npm run build && npm run install-browsers && electron-builder --linux"
+    "dist:linux": "npm run build && npm run install-browsers && electron-builder --linux",
+    "smoke:realworld": "tsx src/main/engine/smoke-realworld.ts"
   },
   "dependencies": {
     "@ghostery/adblocker-playwright": "^2.17.3",

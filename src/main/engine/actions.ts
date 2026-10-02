@@ -4,12 +4,14 @@
 // step's options.
 
 import { promises as fs } from 'fs';
+import { isAbsolute, join } from 'path';
 import type { Locator, Page } from 'playwright';
 import type { Step, Target } from '../../shared/types';
 import { describeTarget } from '../../shared/actions';
 import type { RunContext, LogFn } from './browser';
-import { resolveTarget } from './target';
-import { sleep, uniquePath, release, sanitizeFilename } from './util';
+import { resolveTarget, suggestTargets } from './target';
+import { clearOverlay } from './consent';
+import { sleep, uniquePath, release, sanitizeFilename, csvRow, errorMessage } from './util';
 
 export interface Emit {
   log: LogFn;
@@ -20,25 +22,36 @@ export interface Emit {
  * visible. This is what lets the engine find content that loaded dynamically
  * without a full page navigation (e.g. results injected via AJAX) instead of
  * giving up instantly.
+ *
+ * When it can't be found, the error says where we looked and what similar
+ * buttons the page does have, which is usually enough to fix the step.
  */
-async function locate(ctx: RunContext, target: Target, emit: Emit, what: string): Promise<Locator> {
+async function locate(
+  ctx: RunContext,
+  target: Target,
+  emit: Emit,
+  what: string,
+  /** File inputs are usually styled out of sight, so only wait for them to exist. */
+  state: 'visible' | 'attached' = 'visible'
+): Promise<Locator> {
   const page = ctx.page;
-  const base = await resolveTarget(page, target);
+  const base = await resolveTarget(page, target, state === 'attached' ? { visibleOnly: false } : {});
   const idx = parseIndex(target.index); // 1-based, or undefined for "first"
   const chosen = idx != null ? base.nth(idx - 1) : base.first();
   const desc = describeTarget(target);
   try {
-    await chosen.waitFor({ state: 'visible', timeout: ctx.stepTimeout });
+    await chosen.waitFor({ state, timeout: ctx.stepTimeout });
   } catch (err) {
     if (ctx.signal?.aborted) throw err;
     const n = await base.count().catch(() => 0);
     if (idx != null && idx > n) {
-      throw new Error(`${what}: wanted item #${idx} but only ${n} match${n === 1 ? '' : 'es'} ${desc}.`);
+      throw new Error(`${what}: wanted item #${idx} but only ${n} match${n === 1 ? '' : 'es'} ${desc}.${await where(ctx)}`);
     }
     if (n > 0) {
-      throw new Error(`${what}: found ${desc} but it never became visible within ${secs(ctx.stepTimeout)}.`);
+      throw new Error(`${what}: found ${desc} but it never became visible within ${secs(ctx.stepTimeout)}.${await where(ctx)}`);
     }
-    throw new Error(`${what}: couldn't find ${desc} on the page within ${secs(ctx.stepTimeout)}.`);
+    const hint = target.by === 'text' ? await didYouMean(page, target.text ?? '') : '';
+    throw new Error(`${what}: couldn't find ${desc} within ${secs(ctx.stepTimeout)}.${hint}${await where(ctx)}`);
   }
   const n = await base.count();
   if (idx != null) {
@@ -47,6 +60,23 @@ async function locate(ctx: RunContext, target: Target, emit: Emit, what: string)
     emit.log(`${n} matches for ${desc}; using the first (set “item #” to pick another).`, 'warn');
   }
   return chosen;
+}
+
+/** "Did you mean …" from what's actually on the page. */
+async function didYouMean(page: Page, wanted: string): Promise<string> {
+  const near = await suggestTargets(page, wanted).catch(() => []);
+  if (!near.length) return '';
+  return ` The page does have: ${near.map((t) => `“${t}”`).join(', ')}.`;
+}
+
+/** Where the run was when something failed — the single most useful clue. */
+async function where(ctx: RunContext): Promise<string> {
+  try {
+    const url = ctx.page.url();
+    return url && url !== 'about:blank' ? ` (on ${url})` : '';
+  } catch {
+    return '';
+  }
 }
 
 const secs = (ms: number) => `${Math.round(ms / 100) / 10}s`;
@@ -76,6 +106,48 @@ function advanceAutoIndex(ctx: RunContext, step: Step): void {
 }
 
 /**
+ * Click, and keep trying when a real page gets in the way: scroll it into view,
+ * clear whatever is covering it (cookie banner, modal, ad overlay), then force
+ * the click, and finally click it from inside the page itself. Each fallback is
+ * logged so the run log explains what happened.
+ */
+async function clickWithRecovery(ctx: RunContext, el: Locator, emit: Emit, what: string, kind: 'single' | 'double' | 'right' = 'single'): Promise<void> {
+  const click = (opts: Parameters<Locator['click']>[0] = {}) =>
+    kind === 'double' ? el.dblclick(opts) : el.click({ ...opts, button: kind === 'right' ? 'right' : 'left' });
+
+  try {
+    await click({ timeout: Math.min(ctx.stepTimeout, 20_000) });
+    return;
+  } catch (first) {
+    if (ctx.signal?.aborted) throw first;
+    const reason = errorMessage(first);
+    const blocked = /intercept|not visible|outside of the viewport|stable|enabled|covered/i.test(reason);
+    if (!blocked) throw first;
+    emit.log(`${what}: the click didn't land (${reason.split('.')[0]}). Trying again.`, 'warn');
+
+    await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
+    await clearOverlay(ctx.page, emit.log).catch(() => {});
+    try {
+      await click({ timeout: 5000 });
+      return;
+    } catch {
+      /* fall through to a forced click */
+    }
+    try {
+      await click({ timeout: 5000, force: true });
+      emit.log(`${what}: clicked through an overlay.`, 'debug');
+      return;
+    } catch {
+      /* fall through to a DOM click */
+    }
+    // Last resort: ask the page to click the element itself. This works when an
+    // invisible layer sits on top, which is common on ad-funded download sites.
+    await el.evaluate((node) => (node as HTMLElement).click());
+    emit.log(`${what}: used the page's own click as a last resort.`, 'debug');
+  }
+}
+
+/**
  * Wait up to timeoutMs for a new download to START (from any tab). We watch the
  * "started" counter, not the finished list, so a multi-GB file that takes
  * minutes to save still counts as success the moment it begins.
@@ -90,8 +162,8 @@ async function waitForDownloadStart(ctx: RunContext, beforeStarted: number, time
 }
 
 /** Wait for the page to settle after an action that may navigate. Never throws. */
-async function settle(page: Page): Promise<void> {
-  await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => {});
+async function settle(page: Page, state: 'domcontentloaded' | 'load' | 'networkidle' = 'domcontentloaded'): Promise<void> {
+  await page.waitForLoadState(state, { timeout: 15_000 }).catch(() => {});
 }
 
 export async function runAction(ctx: RunContext, step: Step, emit: Emit): Promise<void> {
@@ -115,8 +187,20 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (!url) throw new Error('Go to: no link was provided.');
       // Add https:// only when there's no scheme at all (leave data:, file:, etc.).
       if (!/^[a-z][a-z0-9+.-]*:/i.test(url)) url = 'https://' + url;
+      const waitUntil = step.options?.navWait ?? 'domcontentloaded';
       emit.log(`Going to ${url}`);
-      await page.goto(url, { waitUntil: 'domcontentloaded' });
+      try {
+        await page.goto(url, { waitUntil, timeout: ctx.stepTimeout });
+      } catch (err) {
+        // A dropped connection or a slow first byte is usually temporary: one
+        // retry saves the whole run on flaky networks and busy sites.
+        const message = errorMessage(err);
+        if (ctx.signal?.aborted || !/net::|ERR_|Timeout|timed out/i.test(message)) throw err;
+        emit.log(`Couldn't load the page (${message.split('\n')[0]}). Trying once more…`, 'warn');
+        await sleep(1500, ctx.signal);
+        await page.goto(url, { waitUntil, timeout: ctx.stepTimeout });
+      }
+      await ctx.afterNavigation?.();
       return;
     }
 
@@ -129,12 +213,14 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       const after = page.url();
       if (after === before) emit.log('Nothing to go back to (no earlier page in history).', 'warn');
       else emit.log(`Now on ${after}`);
+      await ctx.afterNavigation?.();
       return;
     }
 
     case 'reload': {
       emit.log('Reloading the page…');
       await page.reload({ waitUntil: 'domcontentloaded' });
+      await ctx.afterNavigation?.();
       return;
     }
 
@@ -143,9 +229,10 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (!query) throw new Error('Search: nothing to search for.');
       emit.log(`Searching Google for "${query}"`);
       await page.goto('https://www.google.com', { waitUntil: 'domcontentloaded' });
+      await ctx.afterNavigation?.();
       // Dismiss a consent dialog if Google shows one.
       try {
-        await page.getByRole('button', { name: /accept all|i agree/i }).click({ timeout: 2500 });
+        await page.getByRole('button', { name: /accept all|i agree|reject all/i }).first().click({ timeout: 2500 });
       } catch {
         /* no consent dialog */
       }
@@ -160,8 +247,17 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       // Type into a text field / search box on the page we're already on.
       if (!target) throw new Error('Type into field: no field was specified.');
       const field = await locate(ctx, target, emit, 'Type into field');
-      emit.log(`Typing "${step.value ?? ''}" into ${describeTarget(target)}`);
-      await field.fill(step.value ?? '');
+      const text = step.value ?? '';
+      const delay = step.options?.typeDelayMs ?? 0;
+      emit.log(`Typing "${text}" into ${describeTarget(target)}`);
+      if (delay > 0) {
+        // Type like a person: some sites only enable their button on key events.
+        await field.click({ timeout: 5000 }).catch(() => {});
+        await field.fill('');
+        await field.pressSequentially(text, { delay: Math.min(delay, 300) });
+      } else {
+        await field.fill(text);
+      }
       if (step.options?.pressEnter ?? true) {
         emit.log('Pressing Enter', 'debug');
         await field.press('Enter');
@@ -174,8 +270,9 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (!target) throw new Error('Click: no element was specified.');
       if (target.autoIncrement) advanceAutoIndex(ctx, step);
       const el = await locate(ctx, step.target!, emit, 'Click');
-      emit.log(`Clicking ${describeTarget(target)}`);
-      await el.click();
+      const kind = step.options?.clickType ?? 'single';
+      emit.log(`${kind === 'double' ? 'Double-clicking' : kind === 'right' ? 'Right-clicking' : 'Clicking'} ${describeTarget(target)}`);
+      await clickWithRecovery(ctx, el, emit, 'Click', kind);
       await settle(page);
       return;
     }
@@ -185,6 +282,7 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (target.autoIncrement) advanceAutoIndex(ctx, step);
       const el = await locate(ctx, step.target!, emit, 'Hover');
       emit.log(`Hovering over ${describeTarget(target)}`);
+      await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
       await el.hover();
       return;
     }
@@ -221,6 +319,24 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
 
     case 'scroll': {
       const dir = (step.value ?? 'down').trim().toLowerCase();
+      if (dir === 'bottomall') {
+        // Keep scrolling while the page keeps growing: "load more" lists, feeds,
+        // and galleries that only render what you've scrolled past.
+        emit.log('Scrolling to the bottom, loading more each time…');
+        let previous = -1;
+        for (let i = 0; i < 40; i++) {
+          const height = await page.evaluate(() => {
+            const el = document.scrollingElement ?? document.body;
+            window.scrollTo({ top: el.scrollHeight });
+            return el.scrollHeight;
+          });
+          if (height === previous) break;
+          previous = height;
+          await sleep(700, ctx.signal);
+        }
+        emit.log('Reached the bottom.', 'debug');
+        return;
+      }
       emit.log(`Scrolling ${dir === 'bottom' || dir === 'top' ? 'to the ' + dir : dir}`);
       await page.evaluate((d) => {
         const h = document.scrollingElement?.scrollHeight ?? document.body.scrollHeight;
@@ -252,21 +368,34 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       return;
     }
 
+    case 'waitForMe': {
+      // Hand control back to the person: sign in, pick something, pass a check.
+      const message = (step.value ?? '').trim() || 'Do what you need to in the browser window.';
+      emit.log(`Paused for you: ${message}`, 'warn');
+      if (!ctx.pauseForUser) {
+        emit.log('This build can’t pause, so the step was skipped.', 'warn');
+        return;
+      }
+      await ctx.pauseForUser(message);
+      emit.log('Carrying on.', 'debug');
+      return;
+    }
+
     case 'assertText': {
       const text = (step.value ?? '').trim();
       if (!text) throw new Error('Check page text: no text was given.');
       const expect = step.options?.expect ?? 'present';
       const loc = page.getByText(text).first();
       if (expect === 'present') {
-        await loc.waitFor({ state: 'visible', timeout: ctx.stepTimeout }).catch((err) => {
+        await loc.waitFor({ state: 'visible', timeout: ctx.stepTimeout }).catch(async (err) => {
           if (ctx.signal?.aborted) throw err;
-          throw new Error(`Check page text: “${text}” is not on the page.`);
+          throw new Error(`Check page text: “${text}” is not on the page.${await where(ctx)}`);
         });
         emit.log(`Found “${text}” on the page.`, 'success');
       } else {
-        await loc.waitFor({ state: 'hidden', timeout: ctx.stepTimeout }).catch((err) => {
+        await loc.waitFor({ state: 'hidden', timeout: ctx.stepTimeout }).catch(async (err) => {
           if (ctx.signal?.aborted) throw err;
-          throw new Error(`Check page text: “${text}” is on the page, but it shouldn't be.`);
+          throw new Error(`Check page text: “${text}” is on the page, but it shouldn't be.${await where(ctx)}`);
         });
         emit.log(`Confirmed “${text}” is not on the page.`, 'success');
       }
@@ -279,16 +408,64 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       if (!/^\w+$/.test(name)) throw new Error('Save text: the variable needs a name (letters, digits or _).');
       if (target.autoIncrement) advanceAutoIndex(ctx, step);
       const el = await locate(ctx, step.target!, emit, 'Save text');
-      const raw = await el.evaluate((node) => {
-        if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) {
-          return node.value;
-        }
-        return (node as HTMLElement).innerText ?? node.textContent ?? '';
-      });
-      const text = raw.replace(/\s+/g, ' ').trim();
+      const mode = step.options?.extract ?? 'text';
+      let raw: string | null = '';
+      if (mode === 'href') {
+        // Resolve relative links against the page, so the variable is usable.
+        raw = await el.evaluate((node) => (node as HTMLAnchorElement).href ?? node.getAttribute('href'));
+      } else if (mode === 'value') {
+        raw = await el.inputValue().catch(() => el.evaluate((node) => (node as HTMLInputElement).value ?? ''));
+      } else if (mode === 'attribute') {
+        const attr = (step.options?.attribute ?? '').trim();
+        if (!attr) throw new Error('Save text: name the attribute to read (for example src).');
+        raw = await el.getAttribute(attr);
+      } else {
+        raw = await el.evaluate((node) => {
+          if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement || node instanceof HTMLSelectElement) {
+            return node.value;
+          }
+          return (node as HTMLElement).innerText ?? node.textContent ?? '';
+        });
+      }
+      const text = (raw ?? '').replace(/\s+/g, ' ').trim();
+      if (!text) emit.log(`Nothing to read from ${describeTarget(target)} — {{${name}}} is empty.`, 'warn');
       ctx.runVars[name] = text;
       const shown = text.length > 80 ? text.slice(0, 77) + '…' : text;
       emit.log(`Saved {{${name}}} = “${shown}”`, 'success');
+      return;
+    }
+
+    case 'appendRow': {
+      // Collect results as the flow runs: one CSV row per pass.
+      const cells = (step.value ?? '').split(',').map((c) => c.trim());
+      if (!cells.some(Boolean)) throw new Error('Save a row: nothing to write.');
+      const name = sanitizeFilename((step.fileName ?? '').trim() || 'results.csv', 'results.csv');
+      const file = join(ctx.downloadDir, /\.(csv|txt|tsv)$/i.test(name) ? name : name + '.csv');
+      await fs.mkdir(ctx.downloadDir, { recursive: true });
+      const exists = await fs
+        .access(file)
+        .then(() => true)
+        .catch(() => false);
+      if (!exists && ctx.csvHeaders?.length) {
+        await fs.writeFile(file, csvRow(ctx.csvHeaders) + '\n', 'utf-8');
+      }
+      await fs.appendFile(file, csvRow(cells) + '\n', 'utf-8');
+      if (!ctx.savedRows.includes(file)) ctx.savedRows.push(file);
+      emit.log(`Saved a row to ${file}`, 'success');
+      return;
+    }
+
+    case 'uploadFile': {
+      if (!target) throw new Error('Choose a file: no upload field was specified.');
+      const path = (step.fileName ?? '').trim();
+      if (!path) throw new Error('Choose a file: pick the file to attach.');
+      const full = isAbsolute(path) ? path : join(ctx.downloadDir, path);
+      await fs.access(full).catch(() => {
+        throw new Error(`Choose a file: “${full}” doesn't exist.`);
+      });
+      const el = await locate(ctx, target, emit, 'Choose a file', 'attached');
+      emit.log(`Attaching ${full}`);
+      await el.setInputFiles(full);
       return;
     }
 
@@ -342,6 +519,8 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
           }
         }
       }
+      // Cookie banners and consent walls count as "in the way" too.
+      if (await clearOverlay(page, emit.log).catch(() => false)) return;
       emit.log('No ad found (that is okay).');
       return;
     }
@@ -379,13 +558,20 @@ async function runActionInner(ctx: RunContext, step: Step, emit: Emit): Promise<
       const el = await locate(ctx, step.target!, emit, label);
       const waitMs = step.action === 'download' ? ctx.stepTimeout : step.options?.waitMs ?? 30000;
       const before = ctx.downloadsStarted;
+      const skipped = ctx.downloadsSkipped;
       emit.log(`Clicking ${describeTarget(step.target)} and waiting up to ${secs(waitMs)} for the download to start…`);
-      await el.click();
+      await clickWithRecovery(ctx, el, emit, label);
       const got = await waitForDownloadStart(ctx, before, waitMs);
       if (!got) {
+        // A file that was already on disk counts as success, not a failure.
+        if (ctx.downloadsSkipped > skipped) {
+          emit.log('That file is already in the download folder, so it was skipped.', 'success');
+          return;
+        }
         throw new Error(
           `${label}: clicked ${describeTarget(step.target)} but no download started within ${secs(waitMs)}. ` +
-            'The site may need another click first (e.g. a "Continue" step), a longer wait, or it opened the file in a blocked pop-up.'
+            'The site may need another click first (e.g. a "Continue" step), a longer wait, or it opened the file in a blocked pop-up.' +
+            (await where(ctx))
         );
       }
       emit.log('Download started (it keeps saving in the background).');

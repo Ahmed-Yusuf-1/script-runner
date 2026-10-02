@@ -18,7 +18,8 @@ export const ACTION_GROUPS: ActionGroup[] = [
 export type TargetKind =
   | 'element' // visible text or CSS selector (click, hover, …)
   | 'field' // main search box, placeholder/label, or selector
-  | 'select'; // a dropdown by its label, or a selector
+  | 'select' // a dropdown by its label, or a selector
+  | 'file'; // a "choose file" input
 
 export interface ActionMeta {
   label: string;
@@ -117,6 +118,7 @@ export const ACTION_META: Record<Action, ActionMeta> = {
         { value: 'down', label: 'down one screen' },
         { value: 'up', label: 'up one screen' },
         { value: 'bottom', label: 'to the bottom' },
+        { value: 'bottomAll', label: 'to the bottom, loading more' },
         { value: 'top', label: 'to the top' },
       ],
     },
@@ -139,9 +141,30 @@ export const ACTION_META: Record<Action, ActionMeta> = {
     label: 'Save text as variable',
     group: 'Wait & check',
     icon: 'braces',
-    description: 'Read an element’s text into a {{variable}} for later steps.',
+    description: 'Read an element’s text, link or attribute into a {{variable}}.',
     target: 'element',
     pickNth: true,
+  },
+  appendRow: {
+    label: 'Save a row to a file',
+    group: 'Files',
+    icon: 'table',
+    description: 'Append values to a CSV file — one row each time this step runs.',
+    value: { placeholder: '{{title}}, {{price}}  (one cell per comma)', kind: 'text', required: true },
+  },
+  uploadFile: {
+    label: 'Choose a file',
+    group: 'Files',
+    icon: 'paperclip',
+    description: 'Attach a file from your computer to an upload field.',
+    target: 'file',
+  },
+  waitForMe: {
+    label: 'Pause for me',
+    group: 'Wait & check',
+    icon: 'hand',
+    description: 'Stop and wait while you do something in the browser yourself, then press Resume.',
+    value: { placeholder: 'what to do, e.g. sign in and tick the box', kind: 'text' },
   },
   wait: {
     label: 'Wait',
@@ -209,7 +232,7 @@ export function defaultTarget(action: Action, prev?: Target): Target | undefined
     const by = prev?.by === 'placeholder' || prev?.by === 'selector' ? prev.by : 'searchbox';
     return { by, ...keep };
   }
-  if (kind === 'select') {
+  if (kind === 'select' || kind === 'file') {
     const by = prev?.by === 'selector' ? 'selector' : 'placeholder';
     return { by, ...keep };
   }
@@ -231,9 +254,12 @@ export function changeAction(step: Step, action: Action): Step {
   if (!meta.value || meta.value.kind !== prevMeta.value?.kind) next.value = defaultValue(action);
   if (action !== 'extractText') delete next.saveAs;
   else next.saveAs = step.saveAs ?? 'text';
+  if (action !== 'appendRow' && action !== 'uploadFile') delete next.fileName;
+  else if (action === 'appendRow') next.fileName = step.fileName ?? 'results.csv';
   const options = { ...(step.options ?? {}) };
   if (action === 'fillField') options.pressEnter = options.pressEnter ?? true;
   if (action === 'downloadWait') options.waitMs = options.waitMs ?? 30000;
+  if (action === 'click') options.clickType = options.clickType ?? 'single';
   next.options = options;
   return next;
 }

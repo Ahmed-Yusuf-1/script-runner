@@ -26,8 +26,8 @@ A **flow** is an ordered list of steps. Pick each step's action from a searchabl
 | Go to link | Type into a field | Wait for element | Close ad | Screenshot |
 | Go back | Click | Check page text | Close this tab | Download |
 | Reload page | Hover | Save text as variable | Close other tabs | Download & wait |
-| Search Google | Choose from dropdown | Wait | | |
-| | Press a key | | | |
+| Search Google | Choose from dropdown | Wait | | Save a row to a file |
+| | Press a key | Pause for me | | Choose a file |
 | | Scroll | | | |
 
 Steps can be dragged to reorder, duplicated, disabled without deleting, and given a note. Undo and redo cover every edit.
@@ -41,6 +41,22 @@ You don't need CSS selectors. You can target an element by:
 
 When several elements match, pick the **Nth one**, or turn on **Next match each run** to click the 1st match on the first run, the 2nd on the next, and so on.
 
+### Keep going when a page gets in the way
+Real sites are messy, so the engine handles the usual obstacles by itself:
+- **Elements inside iframes** are found like any other, so embedded players, forms and download widgets just work.
+- **Cookie and consent banners** are dismissed after each navigation, preferring "Reject all" where it's offered.
+- **The browser's own alert and confirm boxes** are answered, so a flow can't sit waiting on one.
+- **A click swallowed by an overlay** is retried: scroll it into view, clear what's covering it, then force the click.
+- **When something isn't found**, the error tells you which page you were on and lists the closest buttons that *are* there.
+
+### Do part of it yourself
+Some things shouldn't be automated: signing in, picking a payment method, or a site's "are you human?" check. Add a **Pause for me** step and the run stops there with a note of what you need to do, your computer notifies you, and the flow carries on when you press **Resume**. Logins and checks are remembered between runs, so most sites only ask once.
+
+> Script Runner does not solve CAPTCHAs for you. Clicking a verification widget automatically is bypassing bot detection, so it's deliberately not included.
+
+### Collect what you find
+**Save text as variable** reads an element's text, its link, its value or any attribute into a `{{variable}}`. **Save a row to a file** then appends those values to a CSV, one row per pass, with column names taken from the template. Point a repeat loop at a list and you have a spreadsheet at the end.
+
 ### Reuse flows with variables
 - **Inputs:** put `{{placeholders}}` in any step, for example searching for `{{query}}`, and fill them in the Inputs panel. One flow then works with different inputs.
 - **Save text as variable:** read text from the page (a title, a price, an order number) into `{{name}}` and use it in later steps.
@@ -52,7 +68,7 @@ Choose a range of steps and a number of repetitions. Steps before the range run 
 ### Built for messy, real websites
 - **Ad and tracker blocking** uses Ghostery's full filter lists, cached to disk. If they can't load, it falls back to a built-in list of ad networks.
 - **Pop-up handling** closes ad pop-up windows and tabs, but follows real new pages, such as a download link that continues on another site. A **whitelist** lets chosen sites always open new tabs.
-- **Download capture** saves downloads from any tab into your folder. Files with the same name are kept side by side (`report (1).pdf`), and the browser only closes once every download has finished.
+- **Download capture** saves downloads from any tab into your folder. Files with the same name are kept side by side (`report (1).pdf`), and the browser only closes once every download has finished. You can also **skip files you already have**, so a repeat run picks up where it left off, and group each run's files in their own sub-folder.
 - **Retries** give flaky steps up to 10 more tries. **Wait for element** handles pages that load late.
 - **Tab recovery:** if a site closes the tab mid-run, the flow continues on a live tab instead of failing.
 - **Persistent sessions** remember cookies and logins between runs, so you only sign in once.
@@ -66,6 +82,8 @@ Choose a range of steps and a number of repetitions. Steps before the range run 
 - **Screenshot on failure**, so a headless run that failed shows you what the page looked like.
 - **Console:** a timestamped, colour-coded log you can filter, copy or save, plus the list of files the run saved.
 - **Run history:** the last 200 runs, with their results, per-step outcomes, saved files and full logs, and a Run again button.
+- **Unattended runs:** a time limit that stops a runaway flow, the computer kept awake while it works, and a notification when it finishes.
+- **Nothing is lost:** unsaved edits are kept as a draft and offered back if the app or the computer stops unexpectedly.
 
 ### Presets
 Group flows and settings into **preset profiles**, one per task or site. Switch, create, rename, **export** a preset to a JSON file or **import** one, so you can share or back up automations. Individual flows can be exported and imported too.
@@ -81,6 +99,7 @@ Group flows and settings into **preset profiles**, one per task or site. Switch,
 | New flow | `Ctrl N` |
 | Undo / Redo | `Ctrl Z` / `Ctrl Shift Z` |
 | Duplicate the selected step | `Ctrl D` |
+| Copy / paste a step | `Ctrl C` / `Ctrl V` |
 | Move the selected step | `Alt ↑` / `Alt ↓` |
 | Search flows | `Ctrl F` |
 | Settings | `Ctrl ,` |
@@ -176,6 +195,7 @@ npm run smoke:offline    # engine smoke tests against local pages (headless Chro
 Each smoke test prints `PASS` or `FAIL`. `smoke`, `smoke:adblock` and `smoke:profile` reach real websites, so they're run by hand:
 
 ```bash
+npm run smoke:realworld  # iframes, consent banners, overlays, dialogs, lazy lists, uploads, CSV
 npm run smoke:actions2   # hover, dropdowns, scroll, reload, wait, check text, save text
 npm run smoke:control    # stop, pause/resume, retries, disabled steps, run from/only, error screenshots
 npm run smoke:dlname     # same-named downloads are both kept; safe screenshot names

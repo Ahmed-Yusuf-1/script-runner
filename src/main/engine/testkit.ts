@@ -5,20 +5,21 @@ import { createServer } from 'http';
 import type { IncomingMessage, ServerResponse, Server } from 'http';
 import type { AddressInfo } from 'net';
 import type { Settings } from '../../shared/types';
+import { defaultSettings } from '../../shared/defaults';
 
 export function testSettings(downloadDir: string, overrides: Partial<Settings> = {}): Settings {
   return {
+    ...defaultSettings(downloadDir),
     headless: true,
-    downloadDir,
-    timeoutMs: 15000,
     adblock: false,
     blockPopupWindows: false,
     blockPopupTabs: false,
-    popupWhitelist: [],
     persistentSession: false,
-    slowMoMs: 0,
     screenshotOnError: false,
-    theme: 'system',
+    dismissConsent: false,
+    keepAwake: false,
+    notifyOnFinish: false,
+    downloadWaitMs: 60_000,
     ...overrides,
   };
 }

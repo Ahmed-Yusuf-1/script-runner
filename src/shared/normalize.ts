@@ -117,6 +117,13 @@ export function normalizeSettings(raw: unknown, defaults: Settings): Settings {
     : defaults.popupWhitelist;
   const timeout = num(raw.timeoutMs);
   const slowMo = num(raw.slowMoMs);
+  const sub = str(raw.downloadSubfolder);
+  /** A number within range, or the default. */
+  const bounded = (v: unknown, lo: number, hi: number, fallback: number) => {
+    const n = num(v);
+    return n !== undefined && n >= lo && n <= hi ? n : fallback;
+  };
+  const text = (v: unknown, fallback: string, max = 300) => (str(v) ?? fallback).trim().slice(0, max);
   return {
     headless: bool(raw.headless) ?? defaults.headless,
     downloadDir: (str(raw.downloadDir) ?? '').trim() || defaults.downloadDir,
@@ -129,5 +136,22 @@ export function normalizeSettings(raw: unknown, defaults: Settings): Settings {
     slowMoMs: slowMo !== undefined && slowMo >= 0 ? Math.min(slowMo, 5000) : defaults.slowMoMs,
     screenshotOnError: bool(raw.screenshotOnError) ?? defaults.screenshotOnError,
     theme: theme === 'dark' || theme === 'light' || theme === 'system' ? (theme as Theme) : defaults.theme,
+
+    dismissConsent: bool(raw.dismissConsent) ?? defaults.dismissConsent,
+    handleDialogs: bool(raw.handleDialogs) ?? defaults.handleDialogs,
+    blockImages: bool(raw.blockImages) ?? defaults.blockImages,
+
+    skipExistingDownloads: bool(raw.skipExistingDownloads) ?? defaults.skipExistingDownloads,
+    downloadWaitMs: bounded(raw.downloadWaitMs, 0, 24 * 3_600_000, defaults.downloadWaitMs),
+    downloadSubfolder: sub === 'flow' || sub === 'run' || sub === 'none' ? sub : defaults.downloadSubfolder,
+
+    maxRunMs: bounded(raw.maxRunMs, 0, 24 * 3_600_000, defaults.maxRunMs),
+    keepAwake: bool(raw.keepAwake) ?? defaults.keepAwake,
+    notifyOnFinish: bool(raw.notifyOnFinish) ?? defaults.notifyOnFinish,
+
+    viewportWidth: bounded(raw.viewportWidth, 0, 10_000, defaults.viewportWidth),
+    viewportHeight: bounded(raw.viewportHeight, 0, 10_000, defaults.viewportHeight),
+    userAgent: text(raw.userAgent, defaults.userAgent),
+    proxy: text(raw.proxy, defaults.proxy, 200),
   };
 }

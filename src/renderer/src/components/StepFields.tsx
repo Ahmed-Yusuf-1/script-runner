@@ -222,7 +222,84 @@ export function StepFields({ step, onPatch, disabled }: Props) {
     }
   }
 
+  if (step.action === 'appendRow') {
+    fields.push(
+      <label key="file" className="saveas">
+        <span>in</span>
+        <input
+          className="input mono"
+          style={{ width: 150 }}
+          value={step.fileName ?? ''}
+          placeholder="results.csv"
+          aria-label="File to save the row in"
+          spellCheck={false}
+          disabled={disabled}
+          onChange={(e) => onPatch((s) => ({ ...s, fileName: e.target.value }), key('file'))}
+        />
+      </label>
+    );
+  }
+
+  if (step.action === 'uploadFile') {
+    fields.push(
+      <span key="file" className="row gap-sm grow">
+        <input
+          className="input grow mono"
+          value={step.fileName ?? ''}
+          placeholder="the file to attach"
+          aria-label="File to attach"
+          spellCheck={false}
+          disabled={disabled}
+          onChange={(e) => onPatch((s) => ({ ...s, fileName: e.target.value }), key('file'))}
+        />
+        <button
+          type="button"
+          className="btn sm"
+          disabled={disabled}
+          onClick={async () => {
+            const picked = await window.api.pickFile(step.fileName);
+            if (picked) onPatch((s) => ({ ...s, fileName: picked }));
+          }}
+        >
+          Browse…
+        </button>
+      </span>
+    );
+  }
+
   if (step.action === 'extractText') {
+    const mode = step.options?.extract ?? 'text';
+    fields.push(
+      <select
+        key="extract"
+        className="input"
+        style={{ width: 132 }}
+        value={mode}
+        aria-label="What to read from the element"
+        disabled={disabled}
+        onChange={(e) => onPatch(setOptions({ extract: e.target.value as 'text' | 'href' | 'value' | 'attribute' }))}
+      >
+        <option value="text">its text</option>
+        <option value="href">its link</option>
+        <option value="value">its value</option>
+        <option value="attribute">an attribute</option>
+      </select>
+    );
+    if (mode === 'attribute') {
+      fields.push(
+        <input
+          key="attr"
+          className="input mono"
+          style={{ width: 110 }}
+          value={step.options?.attribute ?? ''}
+          placeholder="src"
+          aria-label="Attribute name"
+          spellCheck={false}
+          disabled={disabled}
+          onChange={(e) => onPatch(setOptions({ attribute: e.target.value }), key('attr'))}
+        />
+      );
+    }
     fields.push(
       <label key="saveAs" className="saveas">
         <span>save as</span>

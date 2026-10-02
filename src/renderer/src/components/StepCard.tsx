@@ -259,6 +259,51 @@ export const StepCard = memo(function StepCard(p: StepCardProps) {
             </select>
           </label>
 
+          {step.action === 'click' && (
+            <label className="field">
+              <span className="field-label">Click</span>
+              <select
+                className="input"
+                value={o.clickType ?? 'single'}
+                disabled={locked}
+                onChange={(e) => patch(setOptions({ clickType: e.target.value as 'single' | 'double' | 'right' }))}
+              >
+                <option value="single">once</option>
+                <option value="double">twice (double-click)</option>
+                <option value="right">with the right button</option>
+              </select>
+            </label>
+          )}
+          {step.action === 'fillField' && (
+            <label className="field">
+              <span className="field-label">Type speed</span>
+              <select
+                className="input"
+                value={o.typeDelayMs ? 'slow' : 'instant'}
+                disabled={locked}
+                title="Some sites only notice typing that arrives key by key"
+                onChange={(e) => patch(setOptions({ typeDelayMs: e.target.value === 'slow' ? 60 : undefined }))}
+              >
+                <option value="instant">all at once</option>
+                <option value="slow">key by key</option>
+              </select>
+            </label>
+          )}
+          {step.action === 'goto' && (
+            <label className="field">
+              <span className="field-label">Wait until</span>
+              <select
+                className="input"
+                value={o.navWait ?? 'domcontentloaded'}
+                disabled={locked}
+                onChange={(e) => patch(setOptions({ navWait: e.target.value as 'domcontentloaded' | 'load' | 'networkidle' }))}
+              >
+                <option value="domcontentloaded">the page starts</option>
+                <option value="load">everything loads</option>
+                <option value="networkidle">the page goes quiet</option>
+              </select>
+            </label>
+          )}
           {step.action === 'downloadWait' && (
             <label className="field">
               <span className="field-label">Wait for the file</span>

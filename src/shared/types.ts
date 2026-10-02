@@ -20,11 +20,14 @@ export type Action =
   | 'scroll' // scroll the page
   | 'waitFor' // wait until an element / text appears (or disappears)
   | 'assertText' // check the page shows (or doesn't show) some text
-  | 'extractText' // read an element's text into a {{variable}}
+  | 'extractText' // read an element's text (or link/attribute) into a {{variable}}
+  | 'appendRow' // append a row of values to a CSV file
+  | 'uploadFile' // attach a file to a file input
   | 'closeAd' // best-effort: dismiss a popup/ad
   | 'closeTab' // close the current tab and return to the previous one
   | 'closeOtherTabs' // close every tab except the current one (clears pop-unders)
   | 'wait' // pause for N milliseconds
+  | 'waitForMe' // pause until the person clicks Resume (sign in, solve a check…)
   | 'screenshot' // capture the page
   | 'download' // click something and save the file it downloads
   | 'downloadWait'; // same as download, with its own time limit for the file to start
@@ -53,6 +56,16 @@ export interface Target {
 }
 
 export interface StepOptions {
+  /** click: a plain click (default), a double click, or a right click. */
+  clickType?: 'single' | 'double' | 'right';
+  /** fillField: type character by character with this pause (ms), like a person. */
+  typeDelayMs?: number;
+  /** extractText: read the element's text (default), its link, its value, or an attribute. */
+  extract?: 'text' | 'href' | 'value' | 'attribute';
+  /** extractText with extract='attribute': which attribute to read. */
+  attribute?: string;
+  /** goto: how long to wait for the page before the step is done. */
+  navWait?: 'domcontentloaded' | 'load' | 'networkidle';
   /** fillField: press Enter after typing (most search boxes need this). */
   pressEnter?: boolean;
   /** What to do if this step fails (after any retries). Defaults to 'stop'. */
@@ -81,6 +94,8 @@ export interface Step {
   target?: Target;
   /** extractText: the variable name the text is saved into (no braces). */
   saveAs?: string;
+  /** appendRow: the CSV file to append to. uploadFile: the file to attach. */
+  fileName?: string;
   /** A disabled step is kept in the flow but skipped when it runs. */
   disabled?: boolean;
   /** Free-form note shown on the step card. */
@@ -174,6 +189,39 @@ export interface Settings {
   screenshotOnError: boolean;
   /** UI theme. */
   theme: Theme;
+
+  // ---- Handling real-world pages ----
+  /** Accept or close cookie / consent banners automatically. */
+  dismissConsent: boolean;
+  /** Answer the browser's own alert / confirm pop-ups so a flow can't hang. */
+  handleDialogs: boolean;
+  /** Don't load images, video or fonts. Runs faster; some sites look broken. */
+  blockImages: boolean;
+
+  // ---- Downloads ----
+  /** Skip a download when a file with that name is already in the folder. */
+  skipExistingDownloads: boolean;
+  /** Give up waiting for downloads to finish after this long (ms). 0 = wait forever. */
+  downloadWaitMs: number;
+  /** Put downloads in a sub-folder: none, one per flow, or one per run. */
+  downloadSubfolder: 'none' | 'flow' | 'run';
+
+  // ---- Safety ----
+  /** Stop a run automatically after this long (ms). 0 = no limit. */
+  maxRunMs: number;
+  /** Keep the computer awake while a flow runs. */
+  keepAwake: boolean;
+  /** Show a desktop notification when a run finishes in the background. */
+  notifyOnFinish: boolean;
+
+  // ---- Advanced browser ----
+  /** Browser window size. 0 × 0 = Playwright's default. */
+  viewportWidth: number;
+  viewportHeight: number;
+  /** Override the browser's user agent. Empty = the browser's own. */
+  userAgent: string;
+  /** Proxy for the automation browser, e.g. http://127.0.0.1:8080. Empty = none. */
+  proxy: string;
 }
 
 // ---- Running ----
@@ -218,6 +266,8 @@ export interface RunProgress {
   downloadsStarted: number;
   downloadsSaved: number;
   paused: boolean;
+  /** Why the run is paused, when a "Pause for me" step asked for it. */
+  pauseReason?: string;
 }
 
 export type RunStatus = 'ok' | 'warn' | 'error' | 'stopped';
@@ -255,6 +305,8 @@ export interface RunRecord {
   steps: StepResult[];
   downloads: SavedFile[];
   screenshots: SavedFile[];
+  /** CSV files that "Save a row" steps wrote to. */
+  dataFiles: SavedFile[];
   log: LogEntry[];
   /** True when older log lines were dropped to keep the record small. */
   logTruncated?: boolean;

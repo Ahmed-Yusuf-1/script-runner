@@ -2,13 +2,14 @@
 // storage, and settings. Validates every payload at this boundary, and owns the
 // current run so Stop / Pause / Resume can reach it.
 
-import { ipcMain, app, shell, nativeTheme } from 'electron';
+import { ipcMain, app, shell, nativeTheme, powerSaveBlocker, Notification, BrowserWindow, net } from 'electron';
 import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import { promises as fs } from 'fs';
 import { resolve, relative, isAbsolute } from 'path';
-import type { Flow, LogEntry, LogLevel, RunOptions, Settings, StepStatus, RunProgress } from '../shared/types';
+import type { Flow, LogEntry, LogLevel, RunOptions, RunResult, Settings, StepStatus, RunProgress } from '../shared/types';
 import type { RunState } from '../shared/api';
 import { normalizeFlow } from '../shared/normalize';
+import { isNewer } from '../shared/version';
 import { runFlow, RunController } from './engine/runner';
 import { listFlows, saveFlow, deleteFlow, exportFlow, importFlows } from './storage/flows';
 import { getSettings, saveSettings } from './storage/settings';
@@ -33,6 +34,39 @@ interface ActiveRun {
   done: Promise<unknown>;
 }
 let active: ActiveRun | null = null;
+
+/** Keeps the computer awake while a flow runs, so a long job isn't cut short by sleep. */
+const awake = {
+  id: null as number | null,
+  start() {
+    if (this.id === null) this.id = powerSaveBlocker.start('prevent-app-suspension');
+  },
+  stop() {
+    if (this.id !== null && powerSaveBlocker.isStarted(this.id)) powerSaveBlocker.stop(this.id);
+    this.id = null;
+  },
+};
+
+/** Tell the user a run finished when they're looking at something else. */
+function notifyFinished(flowName: string, result: RunResult): void {
+  if (!Notification.isSupported()) return;
+  const focused = BrowserWindow.getAllWindows().some((w) => w.isFocused() && w.isVisible());
+  if (focused) return;
+  const status = result.status ?? (result.ok ? 'ok' : 'error');
+  const body =
+    status === 'ok'
+      ? 'Finished successfully.'
+      : status === 'warn'
+        ? 'Finished, but some steps failed.'
+        : status === 'stopped'
+          ? 'Stopped before it finished.'
+          : result.error ?? 'The run failed.';
+  try {
+    new Notification({ title: `Script Runner — ${flowName}`, body, silent: status === 'ok' }).show();
+  } catch {
+    /* notifications unavailable */
+  }
+}
 
 // ---- Payload checks ----
 
@@ -132,6 +166,14 @@ export function registerIpc(): void {
     });
     return dir ?? null;
   });
+  handle('dialog:pickFile', async (_e, current: unknown) => {
+    const [file] = await showOpen({
+      title: 'Choose a file to upload',
+      defaultPath: typeof current === 'string' && current ? current : undefined,
+      properties: ['openFile'],
+    });
+    return file ?? null;
+  });
   handle('profile:clear', async () => {
     if (active) throw new Error('Stop the current run first.');
     await fs.rm(paths.profileDir(), { recursive: true, force: true });
@@ -176,6 +218,7 @@ export function registerIpc(): void {
 
     const work = (async () => {
       const [settings, preset] = await Promise.all([getSettings(), getActivePreset()]);
+      if (settings.keepAwake) awake.start();
       const result = await runFlow(
         flow,
         settings,
@@ -195,6 +238,7 @@ export function registerIpc(): void {
       if (result.record) {
         await addRun(result.record).catch((err) => console.error('Could not save run history', err));
       }
+      if (settings.notifyOnFinish) notifyFinished(flow.name, result);
       // The renderer has the log already; don't send it back twice.
       if (result.record) result.record = { ...result.record, log: [] };
       return result;
@@ -209,6 +253,7 @@ export function registerIpc(): void {
       logs.flush();
       return { ok: false, status: 'error' as const, error: message };
     } finally {
+      awake.stop();
       if (active === current) active = null;
     }
   });
@@ -264,6 +309,11 @@ export function registerIpc(): void {
     await fs.writeFile(filePath, asString(text, 'text'), 'utf-8');
     return true;
   });
+  handle('app:checkUpdate', async () => {
+    const current = app.getVersion();
+    const latest = await latestRelease();
+    return { current, latest: latest?.version ?? null, url: latest?.url ?? null, newer: latest ? isNewer(latest.version, current) : false };
+  });
   handle('app:info', () => ({
     version: app.getVersion(),
     platform: process.platform,
@@ -271,6 +321,22 @@ export function registerIpc(): void {
     chrome: process.versions.chrome,
     dataDir: app.getPath('userData'),
   }));
+}
+
+/** The newest published release, or null when the check fails (offline, rate limited). */
+async function latestRelease(): Promise<{ version: string; url: string } | null> {
+  try {
+    const res = await net.fetch('https://api.github.com/repos/Ahmed-Yusuf-1/script-runner/releases/latest', {
+      headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'script-runner' },
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { tag_name?: unknown; html_url?: unknown };
+    const tag = typeof data.tag_name === 'string' ? data.tag_name.replace(/^v/, '') : '';
+    if (!/^\d+\.\d+/.test(tag)) return null;
+    return { version: tag, url: typeof data.html_url === 'string' ? data.html_url : '' };
+  } catch {
+    return null;
+  }
 }
 
 /** Stop any run and wait (briefly) for it to close its browser. Used on quit. */

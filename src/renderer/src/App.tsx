@@ -23,6 +23,8 @@ import { useUndoable } from './hooks/useUndoable';
 import { useShortcuts } from './hooks/useShortcuts';
 import { useRun } from './hooks/useRun';
 import { copyFlow, copyStep, demoFlow, insertStep, moveStep, newFlow, newStep, removeStepAt, snapshot } from './lib/flow';
+import { Icon } from './components/ui/Icon';
+import { clearDraft, loadDraft, saveDraft } from './lib/draft';
 import { plural } from './lib/format';
 
 const LAST_FLOW_KEY = 'lastFlowId';
@@ -76,6 +78,7 @@ export function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [themePreview, setThemePreview] = useState<Theme | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const clipboard = useRef<Step | null>(null);
 
   // ---- Derived state ----
   const currentSnap = useMemo(() => norm(flow), [flow]);
@@ -142,6 +145,24 @@ export function App() {
       try {
         const [info] = await Promise.all([window.api.appInfo(), loadProfile(recall()), refreshRuns()]);
         setVersion(info.version);
+        // Unsaved work from a crash or a forced quit is offered back.
+        const draft = loadDraft();
+        if (draft) {
+          const restore = await dialogs.confirm({
+            title: `Restore unsaved changes to “${draft.flow.name}”?`,
+            message: 'Script Runner closed before these changes were saved.',
+            confirmLabel: 'Restore',
+            cancelLabel: 'Discard',
+          });
+          if (restore) {
+            ed.reset(draft.flow);
+            setSavedSnap(draft.savedSnap);
+            setView('editor');
+            toast.info('Restored your unsaved changes. Save them to keep them.');
+          } else {
+            clearDraft();
+          }
+        }
       } catch (err) {
         toast.error('Couldn’t load your data: ' + errMsg(err));
       } finally {
@@ -150,6 +171,17 @@ export function App() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Keep a copy of unsaved work, so a crash or a power cut can't lose it.
+  useEffect(() => {
+    if (!loaded) return;
+    if (!dirty) {
+      clearDraft();
+      return;
+    }
+    const t = window.setTimeout(() => saveDraft({ flow, savedSnap, at: Date.now() }), 800);
+    return () => window.clearTimeout(t);
+  }, [flow, dirty, savedSnap, loaded]);
 
   // Warn before closing the window with unsaved changes (the main process asks).
   useEffect(() => {
@@ -177,6 +209,7 @@ export function App() {
       setSavedSnap(norm(saved));
       setFlows((prev) => [saved, ...prev.filter((f) => f.id !== saved.id)].sort(byNewest));
       remember(saved.id);
+      clearDraft();
       return true;
     } catch (err) {
       toast.error('Couldn’t save: ' + errMsg(err));
@@ -438,6 +471,31 @@ export function App() {
     [ed, flow.steps]
   );
 
+  const copySelectedStep = useCallback(() => {
+    const step = flow.steps.find((s) => s.id === selectedId);
+    if (!step) return;
+    clipboard.current = structuredClone(step);
+    void navigator.clipboard?.writeText(JSON.stringify({ type: 'script-runner-step', step }, null, 2)).catch(() => {});
+    toast.info('Step copied');
+  }, [flow.steps, selectedId, toast]);
+
+  const pasteStep = useCallback(async () => {
+    let step: Step | null = clipboard.current;
+    try {
+      const text = await navigator.clipboard?.readText();
+      const parsed = text ? JSON.parse(text) : null;
+      if (parsed?.type === 'script-runner-step' && parsed.step) {
+        const normalized = normalizeFlow({ steps: [parsed.step] });
+        if (normalized?.steps[0]) step = normalized.steps[0];
+      }
+    } catch {
+      /* the clipboard holds something else; fall back to the copied step */
+    }
+    if (!step) return;
+    const at = selectedIndex >= 0 ? selectedIndex + 1 : flow.steps.length;
+    addStepAt(at, copyStep(step));
+  }, [addStepAt, flow.steps.length, selectedIndex]);
+
   const toggleExpand = useCallback((id: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -529,6 +587,8 @@ export function App() {
     'mod+shift+z': () => editing && ed.redo(),
     'mod+y': () => editing && ed.redo(),
     'mod+d': () => editing && selectedId && duplicateStep(selectedId),
+    'mod+c': () => editing && selectedId && copySelectedStep(),
+    'mod+v': () => editing && void pasteStep(),
     'alt+arrowup': () => editing && selectedId && moveBy(selectedId, -1),
     'alt+arrowdown': () => editing && selectedId && moveBy(selectedId, 1),
     'mod+,': () => setShowSettings(true),
@@ -604,6 +664,19 @@ export function App() {
               onResume={run.resume}
               onStop={run.stop}
             />
+            {runningHere && run.paused && (
+              <div className="pause-banner" role="status">
+                <Icon name="hand" size={18} />
+                <div className="pause-text">
+                  <strong>Paused for you</strong>
+                  <span>{run.progress?.pauseReason ?? 'The run continues when you press Resume.'}</span>
+                </div>
+                <button className="btn primary" onClick={run.resume}>
+                  <Icon name="play" />
+                  Resume
+                </button>
+              </div>
+            )}
             <div className="workspace">
               <div className="editor-grid">
                 <StepList

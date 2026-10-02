@@ -3,24 +3,13 @@
 import { app } from 'electron';
 import type { Settings } from '../../shared/types';
 import { normalizeSettings } from '../../shared/normalize';
+import { defaultSettings as baseSettings } from '../../shared/defaults';
 import { paths } from './paths';
 import { readJson, writeJsonAtomic, quarantine, withLock } from './fsutil';
 import { getActivePresetId, readPreset, updatePreset } from './presets';
 
 export function defaultSettings(): Settings {
-  return {
-    headless: false,
-    downloadDir: app.getPath('downloads'),
-    timeoutMs: 15000,
-    adblock: true,
-    blockPopupWindows: true,
-    blockPopupTabs: true,
-    popupWhitelist: [],
-    persistentSession: true,
-    slowMoMs: 0,
-    screenshotOnError: true,
-    theme: 'system',
-  };
+  return baseSettings(app.getPath('downloads'));
 }
 
 export async function getSettings(): Promise<Settings> {

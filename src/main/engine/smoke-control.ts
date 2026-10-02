@@ -151,7 +151,53 @@ async function main() {
       t.check('pause held the run, resume finished it', heldWhilePaused && res.ok && existsSync(join(dir, 'p2.png')), { heldWhilePaused });
     }
 
-    // 9) Built-in variables resolve.
+    // 9) "Pause for me" waits for Resume, and reports why it's waiting.
+    {
+      const dir = fresh();
+      dirs.push(dir);
+      const c = new RunController();
+      let reason = '';
+      const emit = {
+        ...quietEmit,
+        progress: (p: { paused: boolean; pauseReason?: string }) => {
+          if (p.paused && p.pauseReason) reason = p.pauseReason;
+        },
+      };
+      const done = runFlow(
+        flow([{ id: 'p', action: 'waitForMe', value: 'sign in, then press Resume' }, shot('after', 'after.png')]),
+        testSettings(dir),
+        {},
+        emit,
+        c
+      );
+      await new Promise((r) => setTimeout(r, 2500));
+      const waiting = !existsSync(join(dir, 'after.png'));
+      c.resume();
+      const res = await done;
+      t.check(
+        '“Pause for me” waits for Resume and says why',
+        waiting && res.ok && existsSync(join(dir, 'after.png')) && reason.includes('sign in'),
+        { waiting, reason, status: res.status }
+      );
+    }
+
+    // 10) A run stops by itself when it hits the time limit.
+    {
+      const dir = fresh();
+      dirs.push(dir);
+      const started = Date.now();
+      const res = await runFlow(
+        flow([{ id: 'w', action: 'wait', value: '30000' }]),
+        testSettings(dir, { maxRunMs: 2000 }),
+        {},
+        quietEmit,
+        new AbortController().signal
+      );
+      const took = Date.now() - started;
+      t.check(`a run stops itself at the time limit (${took}ms)`, res.status === 'stopped' && took < 10_000, res.status);
+    }
+
+    // 11) Built-in variables resolve.
     {
       const dir = fresh();
       dirs.push(dir);

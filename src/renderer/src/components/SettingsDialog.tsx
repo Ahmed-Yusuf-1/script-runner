@@ -8,11 +8,13 @@ import { Switch } from './ui/Switch';
 import { useDialogs, useToast } from './ui/Dialogs';
 import { SecondsInput } from './StepFields';
 
-type Section = 'general' | 'browser' | 'blocking' | 'data';
+type Section = 'general' | 'browser' | 'blocking' | 'downloads' | 'advanced' | 'data';
 const SECTIONS: { id: Section; label: string; icon: string }[] = [
   { id: 'general', label: 'General', icon: 'sliders' },
   { id: 'browser', label: 'Browser', icon: 'browser' },
   { id: 'blocking', label: 'Pop-ups & ads', icon: 'shield' },
+  { id: 'downloads', label: 'Downloads', icon: 'download' },
+  { id: 'advanced', label: 'Advanced', icon: 'bolt' },
   { id: 'data', label: 'Data & about', icon: 'database' },
 ];
 
@@ -43,6 +45,7 @@ export function SettingsDialog({ settings, presetName, running, onClose, onSave,
   const [section, setSection] = useState<Section>('general');
   const [info, setInfo] = useState<AppInfo | null>(null);
   const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
   const dialogs = useDialogs();
   const toast = useToast();
   const set = (patch: Partial<Settings>) => setDraft((d) => ({ ...d, ...patch }));
@@ -67,6 +70,25 @@ export function SettingsDialog({ settings, presetName, running, onClose, onSave,
       await onSave(draft);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const checkUpdate = async () => {
+    setChecking(true);
+    try {
+      const r = await window.api.checkUpdate();
+      if (r.newer && r.url) {
+        toast.info(`Version ${r.latest} is available.`, {
+          action: { label: 'Open', onClick: () => void window.api.openExternal(r.url!) },
+          duration: 12000,
+        });
+      } else if (r.latest) {
+        toast.success(`You're on the latest version (${r.current}).`);
+      } else {
+        toast.warn('Couldn’t reach GitHub to check for updates.');
+      }
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -201,6 +223,15 @@ export function SettingsDialog({ settings, presetName, running, onClose, onSave,
               >
                 <Switch label="Remember logins between runs" checked={draft.persistentSession} onChange={(v) => set({ persistentSession: v })} />
               </Row>
+              <Row
+                title="Answer the page’s pop-up boxes"
+                desc="The browser’s own “are you sure?” boxes are accepted, so a flow can’t sit waiting on one."
+              >
+                <Switch label="Answer the page’s pop-up boxes" checked={draft.handleDialogs} onChange={(v) => set({ handleDialogs: v })} />
+              </Row>
+              <Row title="Don’t load images or video" desc="Much faster and lighter. Some pages look broken, and image downloads still work.">
+                <Switch label="Don’t load images or video" checked={draft.blockImages} onChange={(v) => set({ blockImages: v })} />
+              </Row>
               <Row title="Saved logins" desc="Sign out of every site in the automation browser.">
                 <button className="btn danger-text" onClick={clearProfile} disabled={running}>
                   Clear saved logins
@@ -211,6 +242,12 @@ export function SettingsDialog({ settings, presetName, running, onClose, onSave,
 
           {section === 'blocking' && (
             <>
+              <Row
+                title="Dismiss cookie banners"
+                desc="Clicks “Reject all” when a consent banner is in the way, or closes it. Keeps banners from blocking clicks."
+              >
+                <Switch label="Dismiss cookie banners" checked={draft.dismissConsent} onChange={(v) => set({ dismissConsent: v })} />
+              </Row>
               <Row title="Block ads and trackers" desc="Uses the full Ghostery filter lists, cached on disk, with a built-in list as a fallback.">
                 <Switch label="Block ads and trackers" checked={draft.adblock} onChange={(v) => set({ adblock: v })} />
               </Row>
@@ -239,16 +276,114 @@ export function SettingsDialog({ settings, presetName, running, onClose, onSave,
             </>
           )}
 
+          {section === 'downloads' && (
+            <>
+              <Row
+                title="Skip files you already have"
+                desc="If a file with that name is already in the folder, don’t download it again. Handy when a repeat run picks up where it left off."
+              >
+                <Switch
+                  label="Skip files you already have"
+                  checked={draft.skipExistingDownloads}
+                  onChange={(v) => set({ skipExistingDownloads: v })}
+                />
+              </Row>
+              <Row title="Keep downloads together" desc="Put each run’s files in their own sub-folder instead of one big folder.">
+                <select
+                  className="input"
+                  value={draft.downloadSubfolder}
+                  aria-label="Download sub-folder"
+                  onChange={(e) => set({ downloadSubfolder: e.target.value as Settings['downloadSubfolder'] })}
+                >
+                  <option value="none">All in one folder</option>
+                  <option value="flow">A folder per flow</option>
+                  <option value="run">A folder per run</option>
+                </select>
+              </Row>
+              <Row title="Give up on stuck downloads" desc="How long to wait for downloads to finish at the end of a run before moving on.">
+                <SecondsInput
+                  ms={draft.downloadWaitMs}
+                  label="Seconds to wait for downloads"
+                  onChange={(ms) => set({ downloadWaitMs: ms ?? 0 })}
+                />
+              </Row>
+            </>
+          )}
+
+          {section === 'advanced' && (
+            <>
+              <Row title="Stop a run after" desc="A safety net for unattended runs. Leave at 0 for no limit.">
+                <SecondsInput ms={draft.maxRunMs} placeholder="0" label="Run time limit in seconds" onChange={(ms) => set({ maxRunMs: ms ?? 0 })} />
+              </Row>
+              <Row title="Keep the computer awake" desc="Stops the machine sleeping part-way through a long run.">
+                <Switch label="Keep the computer awake" checked={draft.keepAwake} onChange={(v) => set({ keepAwake: v })} />
+              </Row>
+              <Row title="Tell me when a run finishes" desc="A desktop notification, when Script Runner isn’t the window you’re looking at.">
+                <Switch label="Tell me when a run finishes" checked={draft.notifyOnFinish} onChange={(v) => set({ notifyOnFinish: v })} />
+              </Row>
+              <Row title="Browser window size" desc="Some sites show a different layout at different sizes. 0 × 0 uses the browser’s own size.">
+                <span className="row gap-sm">
+                  <input
+                    className="input num"
+                    type="number"
+                    min={0}
+                    max={10000}
+                    value={draft.viewportWidth}
+                    aria-label="Browser width"
+                    onChange={(e) => set({ viewportWidth: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                  <span className="muted">×</span>
+                  <input
+                    className="input num"
+                    type="number"
+                    min={0}
+                    max={10000}
+                    value={draft.viewportHeight}
+                    aria-label="Browser height"
+                    onChange={(e) => set({ viewportHeight: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                </span>
+              </Row>
+              <div className="setting-block">
+                <span className="setting-title">User agent</span>
+                <span className="setting-desc">What the browser calls itself. Leave empty unless a site needs something specific.</span>
+                <input
+                  className="input mono small-text"
+                  value={draft.userAgent}
+                  placeholder="(the browser’s own)"
+                  spellCheck={false}
+                  onChange={(e) => set({ userAgent: e.target.value })}
+                />
+              </div>
+              <div className="setting-block">
+                <span className="setting-title">Proxy</span>
+                <span className="setting-desc">Send the automation browser through a proxy, e.g. http://127.0.0.1:8080. Empty = direct.</span>
+                <input
+                  className="input mono small-text"
+                  value={draft.proxy}
+                  placeholder="(none)"
+                  spellCheck={false}
+                  onChange={(e) => set({ proxy: e.target.value })}
+                />
+              </div>
+            </>
+          )}
+
           {section === 'data' && (
             <>
               <Row title="Where your data lives" desc={<span className="mono small-text break">{info?.dataDir ?? '…'}</span>}>
                 <span />
               </Row>
               <Row title="Version" desc={info ? `Script Runner ${info.version} · Electron ${info.electron} · Chromium ${info.chrome}` : '…'}>
-                <button className="btn" onClick={() => void window.api.openExternal('https://github.com/Ahmed-Yusuf-1/script-runner')}>
-                  <Icon name="external" />
-                  Project page
-                </button>
+                <div className="row gap-sm">
+                  <button className="btn" onClick={checkUpdate} disabled={checking}>
+                    {checking ? 'Checking…' : 'Check for updates'}
+                  </button>
+                  <button className="btn" onClick={() => void window.api.openExternal('https://github.com/Ahmed-Yusuf-1/script-runner')}>
+                    <Icon name="external" />
+                    Project page
+                  </button>
+                </div>
               </Row>
               <p className="setting-desc">
                 Script Runner drives a real browser on your behalf. Only automate sites and accounts you’re allowed to, and respect each

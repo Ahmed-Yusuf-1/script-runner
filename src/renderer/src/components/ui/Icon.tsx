@@ -242,6 +242,15 @@ const P: Record<string, JSX.Element> = {
     </>
   ),
   layers: <path d="m12 3 9 5-9 5-9-5zM3 13l9 5 9-5" />,
+  table: (
+    <>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <path d="M3 10h18M3 15h18M9 10v10M15 10v10" />
+    </>
+  ),
+  paperclip: <path d="M20 11.5 12 19.5a5 5 0 0 1-7-7l8-8a3.5 3.5 0 0 1 5 5l-8 8a2 2 0 0 1-3-3l7.5-7.5" />,
+  hand: <path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11m0-1.5a1.5 1.5 0 0 1 3 0V11m0-1a1.5 1.5 0 0 1 3 0v1m0 0a1.5 1.5 0 0 1 3 0v4a6 6 0 0 1-6 6h-2a6 6 0 0 1-6-6v-3a1.5 1.5 0 0 1 3 0" />,
+  bolt: <path d="M13 3 5 14h6l-1 7 8-11h-6z" />,
 };
 
 export type IconName = keyof typeof P;

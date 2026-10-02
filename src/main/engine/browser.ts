@@ -6,6 +6,7 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 import type { LogLevel, SavedFile } from '../../shared/types';
 import { enableAdblock } from './adblock';
 import { setupPageManager } from './pages';
+import { dismissConsent, handleDialogs } from './consent';
 
 export type LogFn = (msg: string, level?: LogLevel) => void;
 
@@ -29,6 +30,16 @@ export interface RunContext {
   autoIndex: Map<string, number>;
   /** Variables produced during the run ("Save text as variable"). */
   runVars: Record<string, string>;
+  /** Downloads skipped because the file was already in the folder. */
+  downloadsSkipped: number;
+  /** CSV files this run appended rows to. */
+  savedRows: string[];
+  /** Column names to write when a "Save a row" step creates a new CSV. */
+  csvHeaders?: string[];
+  /** Called after each navigation: clears cookie banners when that's turned on. */
+  afterNavigation?: () => Promise<void>;
+  /** Hand control to the person until they press Resume (the "Pause for me" step). */
+  pauseForUser?: (message: string) => Promise<void>;
   /** Screenshots taken during the run (by steps or on error). */
   screenshots: SavedFile[];
   /** Aborted when the user presses Stop. */
@@ -53,6 +64,21 @@ export interface LaunchOptions {
   profileDir?: string;
   /** Pause (ms) before every browser action, so a visible run is easy to follow. */
   slowMoMs?: number;
+  /** Accept or close cookie / consent banners automatically. */
+  dismissConsent?: boolean;
+  /** Answer the page's own alert / confirm dialogs instead of leaving them open. */
+  handleDialogs?: boolean;
+  /** Don't load images, media or fonts (faster, lighter runs). */
+  blockImages?: boolean;
+  /** Skip a download when that file name is already in the download folder. */
+  skipExistingDownloads?: boolean;
+  /** Browser window size. Both 0 = Playwright's default. */
+  viewportWidth?: number;
+  viewportHeight?: number;
+  /** Override the browser's user agent. */
+  userAgent?: string;
+  /** Proxy server for the automation browser, e.g. http://127.0.0.1:8080. */
+  proxy?: string;
   /** Optional sink for engine log lines (ad-block status, downloads, etc.). */
   log?: LogFn;
   signal?: AbortSignal;
@@ -67,6 +93,12 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
   let browser: Browser | null = null;
   let context: BrowserContext;
   const slowMo = opts.slowMoMs && opts.slowMoMs > 0 ? opts.slowMoMs : undefined;
+  const viewport =
+    opts.viewportWidth && opts.viewportHeight && opts.viewportWidth > 0 && opts.viewportHeight > 0
+      ? { width: Math.round(opts.viewportWidth), height: Math.round(opts.viewportHeight) }
+      : undefined;
+  const userAgent = opts.userAgent?.trim() || undefined;
+  const proxy = opts.proxy?.trim() ? { server: opts.proxy.trim() } : undefined;
 
   try {
     if (opts.profileDir) {
@@ -75,11 +107,14 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
         headless: opts.headless,
         acceptDownloads: true,
         slowMo,
+        proxy,
+        userAgent,
+        ...(viewport ? { viewport } : {}),
         ...LAUNCH_ARGS,
       });
     } else {
-      browser = await chromium.launch({ headless: opts.headless, slowMo, ...LAUNCH_ARGS });
-      context = await browser.newContext({ acceptDownloads: true });
+      browser = await chromium.launch({ headless: opts.headless, slowMo, proxy, ...LAUNCH_ARGS });
+      context = await browser.newContext({ acceptDownloads: true, userAgent, ...(viewport ? { viewport } : {}) });
     }
   } catch (err) {
     throw new Error(explainLaunchError(err, !!opts.profileDir));
@@ -99,9 +134,18 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     activeDownloads: 0,
     autoIndex: new Map(),
     runVars: {},
+    downloadsSkipped: 0,
+    savedRows: [],
     screenshots: [],
     signal: opts.signal,
   };
+
+  if (opts.handleDialogs ?? true) handleDialogs(context, opts.log);
+  if (opts.dismissConsent ?? true) {
+    ctx.afterNavigation = async () => {
+      await dismissConsent(ctx.page, opts.log).catch(() => false);
+    };
+  }
 
   // Always capture downloads (from any tab); follow real new tabs; close ad
   // pop-ups only if asked. onActiveTab switches the engine's active page.
@@ -110,6 +154,7 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     blockPopupWindows: opts.blockPopupWindows ?? false,
     blockPopupTabs: opts.blockPopupTabs ?? false,
     whitelist: opts.popupWhitelist ?? [],
+    skipExisting: opts.skipExistingDownloads ?? false,
     log: opts.log,
     onActiveTab: (p) => {
       ctx.page = p;
@@ -124,6 +169,9 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     onDownloadDone: () => {
       ctx.activeDownloads = Math.max(0, ctx.activeDownloads - 1);
     },
+    onDownloadSkipped: () => {
+      ctx.downloadsSkipped += 1;
+    },
   });
 
   await enableAdblock(context, {
@@ -131,6 +179,23 @@ export async function launch(opts: LaunchOptions): Promise<RunContext> {
     cacheDir: opts.cacheDir,
     log: opts.log,
   }).catch((e) => opts.log?.('Ad blocker setup failed: ' + (e?.message ?? e), 'warn'));
+
+  if (opts.blockImages) {
+    // Images, video and fonts are most of a page's bytes and none of its logic.
+    // Registered after the ad blocker so this handler runs first; anything we
+    // don't abort falls through to the blocker's own rules.
+    const blockHeavy = (page: Page) =>
+      void page
+        .route('**/*', (route) => {
+          const type = route.request().resourceType();
+          if (type === 'image' || type === 'media' || type === 'font') void route.abort();
+          else void route.fallback();
+        })
+        .catch(() => {});
+    context.pages().forEach(blockHeavy);
+    context.on('page', blockHeavy);
+    opts.log?.('Images and media are blocked for this run.', 'debug');
+  }
 
   return ctx;
 }

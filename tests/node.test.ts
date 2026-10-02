@@ -6,7 +6,9 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join, basename } from 'path';
-import { sanitizeFilename, uniquePath, release, sleep, AbortedError, errorMessage, formatMs } from '../src/main/engine/util';
+import { sanitizeFilename, uniquePath, release, sleep, AbortedError, errorMessage, formatMs, csvRow, csvHeaderNames } from '../src/main/engine/util';
+import { isNewer } from '../src/shared/version';
+import { similarity } from '../src/main/engine/target';
 import { writeJsonAtomic, readJson, withLock, quarantine, isSafeId, listJsonFiles } from '../src/main/storage/fsutil';
 import { insertStep, removeStepAt, moveStep, copyFlow, snapshot } from '../src/renderer/src/lib/flow';
 import type { Flow, Step } from '../src/shared/types';
@@ -155,4 +157,39 @@ test('snapshot ignores timestamps', () => {
   const f = withRepeat(1, 1, 1);
   assert.equal(snapshot(f), snapshot({ ...f, updatedAt: 999, createdAt: 5 }));
   assert.notEqual(snapshot(f), snapshot({ ...f, name: 'G' }));
+});
+
+// ---- CSV output ----
+
+test('csvRow quotes only what needs quoting, and flattens newlines', () => {
+  assert.equal(csvRow(['a', 'b']), 'a,b');
+  assert.equal(csvRow(['Smith, John', 'ok']), '"Smith, John",ok');
+  assert.equal(csvRow(['say "hi"']), '"say ""hi"""');
+  assert.equal(csvRow(['two\nlines']), 'two lines');
+  assert.equal(csvRow(['  padded  ']), 'padded');
+});
+
+test('csvHeaderNames names columns after the variables in the template', () => {
+  assert.deepEqual(csvHeaderNames('{{title}}, {{price}}'), ['title', 'price']);
+  assert.deepEqual(csvHeaderNames('{{a}} {{b}}, literal, '), ['a b', 'literal', 'column 3']);
+});
+
+// ---- update check ----
+
+test('isNewer compares versions numerically, not alphabetically', () => {
+  assert.equal(isNewer('1.2.10', '1.2.9'), true);
+  assert.equal(isNewer('0.3.0', '0.2.9'), true);
+  assert.equal(isNewer('v1.0.1', '1.0.1'), false);
+  assert.equal(isNewer('1.0.0', '1.0.1'), false);
+  assert.equal(isNewer('1.0.0', '1.0.0-beta'), true); // a release beats its pre-release
+  assert.equal(isNewer('nonsense', '1.0.0'), false);
+});
+
+// ---- "did you mean" similarity ----
+
+test('similarity ranks near-misses above unrelated text', () => {
+  assert.ok(similarity('download mp3', 'download mp3') === 1);
+  assert.ok(similarity('download', 'download mp3') > 0.7);
+  assert.ok(similarity('downlod mp3', 'download mp3') > 0.8); // a typo
+  assert.ok(similarity('download', 'subscribe now') < 0.34);
 });

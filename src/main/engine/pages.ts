@@ -8,12 +8,12 @@
 //
 // Kept free of Electron imports so the engine stays testable headless.
 
-import { basename } from 'path';
+import { basename, join } from 'path';
 import { promises as fs } from 'fs';
 import type { BrowserContext, Page, Download } from 'playwright';
 import type { LogLevel, SavedFile } from '../../shared/types';
 import { isAdHost } from './adblock';
-import { uniquePath, release, formatBytes } from './util';
+import { uniquePath, release, formatBytes, fileExists } from './util';
 
 export interface PageManagerOptions {
   downloadDir: string;
@@ -21,6 +21,8 @@ export interface PageManagerOptions {
   blockPopupTabs: boolean;
   /** Sites whose pop-ups are always allowed (never closed). */
   whitelist?: string[];
+  /** Don't download a file again when that name is already in the folder. */
+  skipExisting?: boolean;
   log?: (msg: string, level?: LogLevel) => void;
   /** Called when the engine should switch its active tab to a new page. */
   onActiveTab?: (page: Page) => void;
@@ -30,6 +32,8 @@ export interface PageManagerOptions {
   onDownloadSaved?: (file: SavedFile) => void;
   /** Called when a download finishes saving (or fails). */
   onDownloadDone?: () => void;
+  /** Called when a download was skipped because the file was already there. */
+  onDownloadSkipped?: () => void;
 }
 
 export function setupPageManager(context: BrowserContext, opts: PageManagerOptions): void {
@@ -43,28 +47,49 @@ export function setupPageManager(context: BrowserContext, opts: PageManagerOptio
   const capture = (page: Page) => {
     page.on('download', (d: Download) => {
       pagesThatDownloaded.add(page);
-      opts.onDownloadStart?.();
       const suggested = d.suggestedFilename();
-      log(`Download started: ${suggested}`);
-      void (async () => {
-        let dest = '';
-        try {
-          dest = await uniquePath(opts.downloadDir, suggested);
-          await d.saveAs(dest); // resolves only when the whole file is written
-          const bytes = await fs.stat(dest).then((st) => st.size).catch(() => undefined);
-          const filename = basename(dest);
-          opts.onDownloadSaved?.({ path: dest, filename, bytes });
-          const renamed = filename !== suggested ? ` as ${filename}` : '';
-          log(`Saved ${suggested}${renamed}${bytes != null ? ` (${formatBytes(bytes)})` : ''}`, 'success');
-        } catch (err) {
-          const reason = (await d.failure().catch(() => null)) ?? (err instanceof Error ? err.message : String(err));
-          log(`Download of ${suggested} failed: ${String(reason).split('\n')[0]}`, 'warn');
-        } finally {
-          if (dest) release(dest);
-          opts.onDownloadDone?.();
-        }
-      })();
+
+      // Already got this one? Don't fetch it twice. Repeat loops over a list
+      // then pick up where they left off instead of filling the folder with
+      // "file (1)", "file (2)"…
+      if (opts.skipExisting) {
+        void (async () => {
+          if (await fileExists(join(opts.downloadDir, suggested))) {
+            await d.cancel().catch(() => {});
+            log(`Skipped ${suggested}: it's already in the download folder.`, 'info');
+            opts.onDownloadSkipped?.();
+            return;
+          }
+          startSaving(d, suggested);
+        })();
+        return;
+      }
+      startSaving(d, suggested);
     });
+  };
+
+  /** Stream a download to disk under a free file name. */
+  const startSaving = (d: Download, suggested: string) => {
+    opts.onDownloadStart?.();
+    log(`Download started: ${suggested}`);
+    void (async () => {
+      let dest = '';
+      try {
+        dest = await uniquePath(opts.downloadDir, suggested);
+        await d.saveAs(dest); // resolves only when the whole file is written
+        const bytes = await fs.stat(dest).then((st) => st.size).catch(() => undefined);
+        const filename = basename(dest);
+        opts.onDownloadSaved?.({ path: dest, filename, bytes });
+        const renamed = filename !== suggested ? ` as ${filename}` : '';
+        log(`Saved ${suggested}${renamed}${bytes != null ? ` (${formatBytes(bytes)})` : ''}`, 'success');
+      } catch (err) {
+        const reason = (await d.failure().catch(() => null)) ?? (err instanceof Error ? err.message : String(err));
+        log(`Download of ${suggested} failed: ${String(reason).split('\n')[0]}`, 'warn');
+      } finally {
+        if (dest) release(dest);
+        opts.onDownloadDone?.();
+      }
+    })();
   };
 
   const whitelist = opts.whitelist ?? [];

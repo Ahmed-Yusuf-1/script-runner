@@ -18,6 +18,13 @@ export interface PresetInfo {
   name: string;
 }
 
+export interface UpdateCheck {
+  current: string;
+  latest: string | null;
+  url: string | null;
+  newer: boolean;
+}
+
 export interface AppInfo {
   version: string;
   platform: string;
@@ -49,6 +56,8 @@ export interface ScriptRunnerApi {
   saveSettings(settings: Settings): Promise<Settings>;
   /** Folder picker. Returns the chosen folder, or null if cancelled. */
   pickFolder(current?: string): Promise<string | null>;
+  /** File picker, for the "Choose a file" step. Returns the path, or null. */
+  pickFile(current?: string): Promise<string | null>;
   /** Delete the saved browser profile (cookies and logins). */
   clearBrowserProfile(): Promise<void>;
 
@@ -91,6 +100,8 @@ export interface ScriptRunnerApi {
   /** Ask where to save some text (e.g. a run log) and write it. */
   saveTextFile(defaultName: string, text: string): Promise<boolean>;
   appInfo(): Promise<AppInfo>;
+  /** Ask GitHub whether a newer release exists. Never throws. */
+  checkUpdate(): Promise<UpdateCheck>;
   /** Open a link in the system browser (https only). */
   openExternal(url: string): Promise<void>;
 }

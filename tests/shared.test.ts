@@ -16,6 +16,7 @@ import {
 import { normalizeRepeat, counterAt, MAX_REPEAT_TIMES } from '../src/shared/repeat';
 import { validateFlow, validateStep, issuesByStep } from '../src/shared/validate';
 import { normalizeFlow, normalizeSettings, normalizeStep } from '../src/shared/normalize';
+import { defaultSettings } from '../src/shared/defaults';
 import { changeAction, ACTIONS, ACTION_META, ACTION_GROUPS, describeTarget } from '../src/shared/actions';
 
 const flow = (steps: Step[], extra: Partial<Flow> = {}): Flow => ({ id: 'f', name: 'F', steps, createdAt: 0, updatedAt: 0, ...extra });
@@ -161,19 +162,7 @@ test('normalizeStep keeps v0.1 fields and converts numeric values', () => {
 });
 
 test('normalizeSettings migrates blockPopups and rejects bad values', () => {
-  const d = {
-    headless: false,
-    downloadDir: '/dl',
-    timeoutMs: 15000,
-    adblock: true,
-    blockPopupWindows: true,
-    blockPopupTabs: true,
-    popupWhitelist: [],
-    persistentSession: true,
-    slowMoMs: 0,
-    screenshotOnError: true,
-    theme: 'system' as const,
-  };
+  const d = defaultSettings('/dl');
   const s = normalizeSettings({ blockPopups: false, timeoutMs: 5, theme: 'neon', popupWhitelist: [' a.com ', 3, ''], downloadDir: '  ' }, d);
   assert.equal(s.blockPopupWindows, false);
   assert.equal(s.blockPopupTabs, false);
@@ -184,12 +173,42 @@ test('normalizeSettings migrates blockPopups and rejects bad values', () => {
   assert.deepEqual(normalizeSettings('garbage', d), d);
 });
 
+test('validation covers the file-based steps', () => {
+  const errs = (s: Step) => validateStep(s).filter((i) => i.level === 'error').map((i) => i.message);
+  assert.equal(errs({ id: '1', action: 'uploadFile', target: { by: 'placeholder', text: 'CV' } }).length, 1);
+  assert.equal(errs({ id: '2', action: 'uploadFile', target: { by: 'placeholder', text: 'CV' }, fileName: '/tmp/a.pdf' }).length, 0);
+  assert.equal(errs({ id: '3', action: 'appendRow', value: '{{a}}', fileName: '' }).length, 1);
+  assert.equal(errs({ id: '4', action: 'appendRow', value: '{{a}}', fileName: 'out.csv' }).length, 0);
+  assert.equal(
+    errs({ id: '5', action: 'extractText', saveAs: 'x', target: { by: 'text', text: 'a' }, options: { extract: 'attribute' } }).length,
+    1
+  );
+});
+
+test('a row with no variables is only a warning', () => {
+  const issues = validateStep({ id: '1', action: 'appendRow', value: 'fixed text', fileName: 'out.csv' });
+  assert.equal(issues.filter((i) => i.level === 'error').length, 0);
+  assert.equal(issues.filter((i) => i.level === 'warning').length, 1);
+});
+
 // ---- actions ----
 
 test('every action has metadata in a known group', () => {
   for (const a of ACTIONS) {
     assert.ok(ACTION_META[a].label, a);
     assert.ok(ACTION_GROUPS.includes(ACTION_META[a].group), a);
+  }
+});
+
+test('every action is reachable from the picker and keeps a stable shape', () => {
+  // A step switched through every action in turn must stay valid at each hop.
+  let step: Step = { id: '1', action: 'goto', value: 'example.com' };
+  for (const a of ACTIONS) {
+    step = changeAction(step, a);
+    assert.equal(step.action, a);
+    const meta = ACTION_META[a];
+    if (meta.target) assert.ok(step.target, `${a} should have a target`);
+    else assert.equal(step.target, undefined, `${a} should not have a target`);
   }
 });
 

@@ -1035,6 +1035,34 @@ code.var,
   background: var(--warn);
 }
 
+/* ---------- Paused for you ---------- */
+
+.pause-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 14px 20px 0 22px;
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  color: var(--text);
+}
+.pause-banner > .icon {
+  color: var(--warn);
+}
+.pause-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.pause-text span {
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
 /* ---------- Editor ---------- */
 
 .workspace {

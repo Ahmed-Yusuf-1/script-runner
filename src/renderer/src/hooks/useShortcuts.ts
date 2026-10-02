@@ -38,8 +38,11 @@ export function useShortcuts(bindings: Bindings): void {
       const combo = comboOf(e);
       const fn = ref.current[combo];
       if (!fn) return;
+      // Bare keys, and the clipboard keys, belong to whatever field has focus.
       const bare = !combo.includes('mod') && !combo.includes('alt');
-      if (bare && isTyping(document.activeElement)) return;
+      const clipboard = ['mod+c', 'mod+v', 'mod+x', 'mod+a'].includes(combo);
+      if ((bare || clipboard) && isTyping(document.activeElement)) return;
+      if (clipboard && (window.getSelection()?.toString().length ?? 0) > 0) return;
       e.preventDefault();
       fn(e);
     };

@@ -49,6 +49,20 @@ export function validateStep(step: Step): Issue[] {
     err('Give the variable a name made of letters, digits or _.');
   }
 
+  if (step.action === 'uploadFile' && !(step.fileName ?? '').trim()) {
+    err('Choose the file to attach.');
+  }
+
+  if (step.action === 'appendRow') {
+    if (!(step.fileName ?? '').trim()) err('Name the file to save rows in, for example results.csv.');
+    else if (/[\\/]/.test(step.fileName ?? '')) warn('Folders in the name are ignored; the file is saved in the download folder.');
+    if ((step.value ?? '').includes('{{') === false) warn('This row has no {{variables}}, so every row will be identical.');
+  }
+
+  if (step.action === 'extractText' && step.options?.extract === 'attribute' && !(step.options.attribute ?? '').trim()) {
+    err('Name the attribute to read, for example src.');
+  }
+
   if (step.action === 'screenshot' && /[\\/]/.test(step.value ?? '')) {
     warn('Folders in the file name are ignored; the screenshot is saved in the download folder.');
   }

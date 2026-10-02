@@ -30,7 +30,7 @@ import { normalizeRepeat, counterAt } from '../../shared/repeat';
 import { launch, close } from './browser';
 import type { RunContext } from './browser';
 import { runAction } from './actions';
-import { sleep, uniquePath, release, errorMessage, formatMs, AbortedError } from './util';
+import { sleep, uniquePath, release, errorMessage, formatMs, sanitizeFilename, csvHeaderNames, AbortedError } from './util';
 
 export interface RunEmit {
   log: (msg: string, level?: LogLevel) => void;
@@ -185,6 +185,7 @@ export async function runFlow(
 
   let halt: Halt | null = null;
   let continuedFailures = 0;
+  let dataFiles: { path: string; filename: string; bytes?: number }[] = [];
 
   const finish = (status: RunStatus, error?: string): RunResult => {
     const endedAt = Date.now();
@@ -201,17 +202,30 @@ export async function runFlow(
       steps: [...results.values()],
       downloads: ctx ? [...ctx.downloads] : [],
       screenshots: ctx ? [...ctx.screenshots] : [],
+      dataFiles: dataFiles.slice(),
       log: logEntries,
       logTruncated: logTruncated || undefined,
     };
     return { ok: status !== 'error', status, error, record };
   };
 
+  // Downloads can go straight into the folder, or be grouped per flow or per run
+  // so a big job doesn't mix with everything else.
+  const builtins = builtinValues(new Date(startedAt));
+  const folderName = sanitizeFilename(flow.name || 'Flow', 'Flow');
+  const downloadDir =
+    settings.downloadSubfolder === 'flow'
+      ? join(settings.downloadDir, folderName)
+      : settings.downloadSubfolder === 'run'
+        ? join(settings.downloadDir, `${folderName} ${builtins.datetime}`)
+        : settings.downloadDir;
+
   // Make sure the download folder exists before anything tries to save into it.
   try {
-    await fs.mkdir(settings.downloadDir, { recursive: true });
+    await fs.mkdir(downloadDir, { recursive: true });
+    if (downloadDir !== settings.downloadDir) log(`Saving files to ${downloadDir}`, 'debug');
   } catch (err) {
-    const message = `Can't use the download folder “${settings.downloadDir}”: ${errorMessage(err)}`;
+    const message = `Can't use the download folder “${downloadDir}”: ${errorMessage(err)}`;
     log(message, 'error');
     return finish('error', message);
   }
@@ -220,13 +234,21 @@ export async function runFlow(
   try {
     ctx = await launch({
       headless: settings.headless,
-      downloadDir: settings.downloadDir,
+      downloadDir,
       timeoutMs: settings.timeoutMs,
       adblock: settings.adblock,
       blockPopupWindows: settings.blockPopupWindows,
       blockPopupTabs: settings.blockPopupTabs,
       popupWhitelist: settings.popupWhitelist,
       slowMoMs: settings.slowMoMs,
+      dismissConsent: settings.dismissConsent,
+      handleDialogs: settings.handleDialogs,
+      blockImages: settings.blockImages,
+      skipExistingDownloads: settings.skipExistingDownloads,
+      viewportWidth: settings.viewportWidth,
+      viewportHeight: settings.viewportHeight,
+      userAgent: settings.userAgent,
+      proxy: settings.proxy,
       cacheDir: opts.cacheDir,
       profileDir: settings.persistentSession && opts.cacheDir ? join(opts.cacheDir, 'browser-profile') : undefined,
       log,
@@ -239,9 +261,26 @@ export async function runFlow(
   }
   const run = ctx;
 
+  // The "Pause for me" step hands control to the person until they press Resume.
+  run.pauseForUser = async (message: string) => {
+    pushProgress({ paused: true, pauseReason: message });
+    controller.pause();
+    await controller.waitIfPaused();
+    pushProgress({ paused: false, pauseReason: undefined });
+  };
+
   const onAbort = () => void close(run);
   signal.addEventListener('abort', onAbort);
   const ticker = setInterval(() => pushProgress(), 1000);
+
+  // A safety net for unattended runs: stop automatically after the time limit.
+  const limit =
+    settings.maxRunMs > 0
+      ? setTimeout(() => {
+          log(`Stopping: this run hit the ${formatMs(settings.maxRunMs)} time limit.`, 'warn');
+          controller.stop();
+        }, settings.maxRunMs)
+      : null;
   pushProgress();
 
   /** Run step i with the given variables. Returns a Halt to end the run. */
@@ -249,6 +288,8 @@ export async function runFlow(
     await controller.waitIfPaused();
     if (signal.aborted) return { status: 'stopped' };
     pushProgress({ stepIndex: i, pass, passes: pass != null && repeat ? repeat.times : undefined });
+    // A new CSV gets a header row named after the variables in the template.
+    run.csvHeaders = steps[i].action === 'appendRow' ? csvHeaderNames(steps[i].value ?? '') : undefined;
     const r = await runStep(run, steps[i], i, settings, { ...stepVars, ...run.runVars }, log, setStatus, signal);
     const res = results.get(steps[i].id)!;
     if (r.outcome !== 'skipped') {
@@ -295,7 +336,7 @@ export async function runFlow(
           for (let i = first; i <= to && !halt; i++) halt = await exec(i, passVars, p + 1);
           if (halt || p === repeat.times - 1) break;
           // Don't start the next repetition while a download is still saving.
-          if (repeat.waitForDownloads) await waitForActiveDownloads(run, log, signal);
+          if (repeat.waitForDownloads) await waitForActiveDownloads(run, log, signal, settings.downloadWaitMs);
           if (repeat.delayMs > 0 && !signal.aborted) {
             log(`Pausing ${formatMs(repeat.delayMs)} before the next repetition…`, 'debug');
             await sleep(repeat.delayMs, signal).catch(() => {});
@@ -310,7 +351,7 @@ export async function runFlow(
 
     // Let any in-progress download finish before we close the browser (closing
     // would abort a large download mid-stream).
-    if (!halt && !signal.aborted) await waitForActiveDownloads(run, log, signal);
+    if (!halt && !signal.aborted) await waitForActiveDownloads(run, log, signal, settings.downloadWaitMs);
     if (signal.aborted && !halt) halt = { status: 'stopped' };
   } catch (err) {
     if (signal.aborted) halt = { status: 'stopped' };
@@ -321,7 +362,15 @@ export async function runFlow(
     }
   } finally {
     clearInterval(ticker);
+    if (limit) clearTimeout(limit);
     signal.removeEventListener('abort', onAbort);
+    dataFiles = await Promise.all(
+      run.savedRows.map(async (p) => ({
+        path: p,
+        filename: p.split(/[\\/]/).pop() ?? p,
+        bytes: await fs.stat(p).then((st) => st.size).catch(() => undefined),
+      }))
+    );
     await close(run);
     log('Browser closed.', 'debug');
   }
@@ -351,10 +400,22 @@ export async function runFlow(
 }
 
 /** Block until all in-progress downloads finish saving (or the user hits Stop). */
-async function waitForActiveDownloads(ctx: RunContext, log: (m: string, l?: LogLevel) => void, signal: AbortSignal): Promise<void> {
+async function waitForActiveDownloads(
+  ctx: RunContext,
+  log: (m: string, l?: LogLevel) => void,
+  signal: AbortSignal,
+  maxWaitMs = 0
+): Promise<void> {
   if (ctx.activeDownloads <= 0 || signal.aborted) return;
   log(`Waiting for ${ctx.activeDownloads} download(s) to finish saving…`);
+  const started = Date.now();
   while (ctx.activeDownloads > 0 && !signal.aborted) {
+    // A download that stalls forever shouldn't hold the run (and the browser)
+    // open for the rest of the day.
+    if (maxWaitMs > 0 && Date.now() - started > maxWaitMs) {
+      log(`Still ${ctx.activeDownloads} download(s) unfinished after ${formatMs(maxWaitMs)} — carrying on without them.`, 'warn');
+      return;
+    }
     await sleep(300, signal).catch(() => {});
   }
   if (!signal.aborted) log('Download(s) finished.', 'debug');

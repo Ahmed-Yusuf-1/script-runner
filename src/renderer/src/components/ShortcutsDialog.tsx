@@ -25,6 +25,8 @@ export const SHORTCUTS: { group: string; items: [string, string][] }[] = [
       ['mod+z', 'Undo'],
       ['mod+shift+z', 'Redo'],
       ['mod+d', 'Duplicate the selected step'],
+      ['mod+c', 'Copy the selected step'],
+      ['mod+v', 'Paste a step'],
       ['alt+arrowup', 'Move the selected step up'],
       ['alt+arrowdown', 'Move the selected step down'],
       ['?', 'Show these shortcuts'],

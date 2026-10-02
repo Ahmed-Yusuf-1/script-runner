@@ -34,6 +34,7 @@ const api: ScriptRunnerApi = {
   getSettings: () => invoke('settings:get'),
   saveSettings: (settings) => invoke('settings:save', settings),
   pickFolder: (current) => invoke('dialog:pickFolder', current),
+  pickFile: (current) => invoke('dialog:pickFile', current),
   clearBrowserProfile: () => invoke('profile:clear'),
 
   listPresets: () => invoke('presets:list'),
@@ -64,6 +65,7 @@ const api: ScriptRunnerApi = {
   showInFolder: (path) => invoke('shell:showInFolder', path),
   saveTextFile: (name, text) => invoke('file:saveText', name, text),
   appInfo: () => invoke('app:info'),
+  checkUpdate: () => invoke('app:checkUpdate'),
   openExternal: (url) => invoke('shell:openExternal', url),
 };
 
