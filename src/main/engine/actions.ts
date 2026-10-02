@@ -130,6 +130,15 @@ async function clickWithRecovery(ctx: RunContext, el: Locator, emit: Emit, what:
     const reason = errorMessage(first);
     const blocked = /intercept|not visible|outside of the viewport|stable|enabled|covered|timeout/i.test(raw);
     if (!blocked) throw first;
+
+    // A disabled control must not be "clicked" by force: that would report
+    // success while nothing happened. Say so instead.
+    const disabled =
+      (await el.isDisabled().catch(() => false)) || (await el.getAttribute('aria-disabled').catch(() => null)) === 'true';
+    if (disabled) {
+      throw new Error(`${what}: that element is switched off right now, so it can't be clicked. The page may need something filled in first.`);
+    }
+
     emit.log(`${what}: the click didn't land (${reason.split('.')[0]}). Trying again.`, 'warn');
 
     await el.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});

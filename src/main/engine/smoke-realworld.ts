@@ -49,6 +49,9 @@ const PAGES: Record<string, string> = {
     addEventListener('scroll', () => { if (window.scrollY + window.innerHeight >= document.body.scrollHeight - 50) add(); });
   </script></body>`,
 
+  // A button the page has switched off.
+  '/disabled': `<!doctype html><body><button disabled onclick="this.textContent='Clicked'">Submit order</button></body>`,
+
   // A file input that reports what was attached.
   '/upload': `<!doctype html><body>
     <label for="cv">Your CV</label>
@@ -137,7 +140,17 @@ async function main() {
       csv
     );
 
+    // A switched-off button fails honestly instead of being forced.
+    await ctx.page.goto(srv.base + '/disabled');
+    ctx.stepTimeout = 2500;
+    const offErr = await runAction(ctx, step({ action: 'click', target: { by: 'text', text: 'Submit order' } }), emit).then(
+      () => '',
+      (e: Error) => e.message
+    );
+    t.check('a disabled button reports why instead of pretending to click', /switched off/i.test(offErr), offErr);
+
     // A missing target explains itself instead of just timing out.
+    await ctx.page.goto(srv.base + '/list');
     ctx.stepTimeout = 800;
     const err = await runAction(ctx, step({ action: 'click', target: { by: 'text', text: 'First fil' } }), emit).then(
       () => '',
