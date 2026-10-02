@@ -88,6 +88,19 @@ Choose a range of steps and a number of repetitions. Steps before the range run 
 ### Presets
 Group flows and settings into **preset profiles**, one per task or site. Switch, create, rename, **export** a preset to a JSON file or **import** one, so you can share or back up automations. Individual flows can be exported and imported too.
 
+## Settings
+
+Settings live with the active preset, so each preset can work differently.
+
+| Section | What's there |
+|---|---|
+| General | Theme, download folder, step time limit, screenshot when a step fails |
+| Browser | Show the browser or run hidden, slow motion, answer the page's pop-up boxes, don't load images or video, remember logins, clear saved logins |
+| Pop-ups & ads | Dismiss cookie banners, block ads and trackers, close pop-up windows and tabs, the always-allow list |
+| Downloads | Skip files you already have, a folder per flow or per run, when to give up on stuck downloads |
+| Advanced | Stop a run after a time limit, keep the computer awake, notify when a run finishes, browser window size, user agent, proxy |
+| Data & about | Where your data lives, version, check for updates |
+
 ## Keyboard shortcuts
 
 | Action | Shortcut |
